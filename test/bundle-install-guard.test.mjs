@@ -40,3 +40,10 @@ test('V-M1-RENAME: both spellings reserve the stable plugin identity', () => {
       error.code === 'DFY_BUNDLE_CONFLICT' && error.reasons.includes('row-package'));
   }
 });
+test('V-P1-BUNDLE: preset identities and plugin subpaths cannot collide', () => {
+  for (const row of [
+    { id: 'dafeyu-preset-private', name: 'unrelated' },
+    { name: 'dsh-dafeiyu/policy' },
+    { name: '@deepseek-ai/dsh-agent-preset', config: { id: 'dafeyu-public' } },
+  ]) assert.throws(() => assertFreshBundleTarget([row], []), /DFY_BUNDLE_CONFLICT/);
+});

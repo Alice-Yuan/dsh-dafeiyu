@@ -34,6 +34,7 @@ __pycache__/
 *cookies*.json
 *.pem
 *.key
+*.dpapi
 
 # OS noise
 .DS_Store

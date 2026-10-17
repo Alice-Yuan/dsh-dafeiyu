@@ -11,8 +11,9 @@ export function assertFreshBundleTarget(entries, existingPackageNames) {
   const visit = rows => {
     for (const row of rows) {
       if (!row || typeof row !== 'object' || Array.isArray(row)) fail('DFY_INVALID_ENTRY_TREE');
-      if (row.id === 'dafeyu') reasons.add('row-id');
-      if (names.includes(row.name)) reasons.add('row-package');
+      if (['dafeyu', 'dafeyu-preset-private', 'dafeyu-preset-public'].includes(row.id)) reasons.add('row-id');
+      if (names.some(name => row.name === name || typeof row.name === 'string' && row.name.startsWith(name + '/'))) reasons.add('row-package');
+      if (row.name === '@deepseek-ai/dsh-agent-preset' && ['dafeyu-private', 'dafeyu-public'].includes(row.config?.id)) reasons.add('preset-id');
       if (row.group) {
         if (!Array.isArray(row.config)) fail('DFY_INVALID_ENTRY_TREE');
         visit(row.config);

@@ -1,0 +1,193 @@
+import { createHash, randomUUID } from 'node:crypto';
+import QRCode from 'qrcode';
+import { decimalId, LIMITS, PilotError, type Account, type BiliPort, type Comment, type CommentPage, type SendReceipt, type SendTarget, type VideoMaterial, type Visibility } from '../pilot/contracts.js';
+import { credentialOf, type Credential, type Vault } from './vault.js';
+
+type Obj = Record<string, unknown>;
+function obj(value: unknown): Obj { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PilotError('PLATFORM_SCHEMA_CHANGED'); return value as Obj; }
+function str(value: unknown, max = 4000): string { if (typeof value !== 'string') throw new PilotError('PLATFORM_SCHEMA_CHANGED'); return value.slice(0, max); }
+function list(value: unknown): unknown[] { if (value === null) return []; if (!Array.isArray(value)) throw new PilotError('PLATFORM_SCHEMA_CHANGED'); return value; }
+function requireWritable(data: Obj): void {
+  const config = obj(data.config), control = obj(data.control);
+  if (config.read_only === true || control.input_disable === true) throw new PilotError('COMMENTS_READ_ONLY');
+  if (config.read_only !== false || control.input_disable !== false) throw new PilotError('COMMENT_CAPABILITY_UNKNOWN');
+}
+export function parseLossless(text: string): unknown {
+  // Node 24's JSON.parse source context retains integer digits before IEEE-754 conversion.
+  return JSON.parse(text, (_key: string, value: unknown, context?: { source?: string }) => {
+    if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      if (context?.source && /^-?\d+$/.test(context.source)) return context.source;
+      throw new PilotError('UNSAFE_PLATFORM_ID');
+    }
+    return value;
+  });
+}
+export function commentOf(value: unknown, aid: string): Comment {
+  const v = obj(value);
+  if (decimalId(v.oid_str ?? v.oid) !== aid || Number(v.type) !== 1) throw new PilotError('PLATFORM_TARGET_MISMATCH');
+  const member = obj(v.member);
+  if (typeof v.ctime !== 'number' || !Number.isSafeInteger(v.ctime)) throw new PilotError('PLATFORM_SCHEMA_CHANGED');
+  return { id: decimalId(v.rpid_str ?? v.rpid), uid: decimalId(member.mid), root: decimalId(v.root_str ?? v.root), parent: decimalId(v.parent_str ?? v.parent), text: str(obj(v.content).message, 2000), createdAt: v.ctime * 1000 };
+}
+const API = 'https://api.bilibili.com';
+const PASSPORT = 'https://passport.bilibili.com';
+// Protocol permutation, not executable code loaded from an external project.
+const WBI_ORDER = '46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52'.split(',').map(Number);
+export function signWbi(params: Record<string, string>, img: string, sub: string, timestamp: number): string {
+  if (!/^[a-f0-9]{32}$/.test(img) || !/^[a-f0-9]{32}$/.test(sub)) throw new PilotError('PLATFORM_SCHEMA_CHANGED');
+  const source = img + sub; let key = ''; for (const n of WBI_ORDER.slice(0, 32)) key += source.charAt(n);
+  const values = { ...params, wts: String(timestamp) };
+  const query = Object.keys(values).sort().map(k => encodeURIComponent(k) + '=' + encodeURIComponent(values[k as keyof typeof values]!.replace(/[!'()*]/g, ''))).join('&');
+  return query + '&w_rid=' + createHash('md5').update(query + key).digest('hex');
+}
+export class Bilibili implements BiliPort {
+  private login: { id: string; key: string; expires: number; lastPoll: number } | null = null;
+  constructor(private readonly vault: Vault, private readonly fetcher: typeof fetch = fetch, private readonly now = Date.now) {}
+  async hasCredential(): Promise<Account | null> { const c = await this.vault.read(); return c ? { uid: c.uid, name: '' } : null; }
+  private async raw(url: string, signal: AbortSignal, credential: Credential | null = null, body?: URLSearchParams): Promise<{ data: Obj; headers: Headers }> {
+    const u = new URL(url);
+    if (![API, PASSPORT].includes(u.origin) || u.username || u.password) throw new PilotError('NETWORK_TARGET_DENIED');
+    const headers: Record<string, string> = { Referer: 'https://www.bilibili.com/', Accept: 'application/json' };
+    if (credential) headers.Cookie = `SESSDATA=${credential.sessdata}; bili_jct=${credential.csrf}; DedeUserID=${credential.uid}; buvid3=${credential.buvid3}`;
+    if (body) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    let response: Response;
+    try { response = await this.fetcher(u, { method: body ? 'POST' : 'GET', headers, ...(body ? { body } : {}), signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]), redirect: 'error' }); }
+    catch { throw new PilotError(body ? 'SEND_OUTCOME_UNKNOWN' : signal.aborted ? 'CANCELLED' : 'PLATFORM_NETWORK_FAILED'); }
+    if (!response.ok) throw new PilotError(body ? 'SEND_OUTCOME_UNKNOWN' : response.status === 429 || response.status === 412 ? 'PLATFORM_RESTRICTED' : 'PLATFORM_HTTP_FAILED');
+    let parsed: Obj;
+    try { parsed = obj(parseLossless(await boundedText(response))); }
+    catch { throw new PilotError(body ? 'SEND_OUTCOME_UNKNOWN' : 'PLATFORM_SCHEMA_CHANGED'); }
+    if (parsed.code !== 0) {
+      if (parsed.code === -101 || parsed.code === -111) throw new PilotError('AUTH_EXPIRED');
+      if ([-352, -412, 12002, 12016, 12051, 12061, 12064].includes(Number(parsed.code))) throw new PilotError('PLATFORM_RESTRICTED');
+      throw new PilotError(body ? 'SEND_REJECTED' : 'PLATFORM_REQUEST_REJECTED');
+    }
+    return { data: obj(parsed.data), headers: response.headers };
+  }
+  private async credential(): Promise<Credential> { const c = await this.vault.read(); if (!c) throw new PilotError('LOGIN_REQUIRED'); return c; }
+  private async nav(signal: AbortSignal): Promise<Obj> {
+    const c = await this.credential(); const { data } = await this.raw(API + '/x/web-interface/nav', signal, c);
+    if (data.isLogin !== true || decimalId(data.mid) !== c.uid) throw new PilotError('ACCOUNT_CHANGED');
+    return data;
+  }
+  async account(signal: AbortSignal): Promise<Account> { const n = await this.nav(signal); return { uid: decimalId(n.mid), name: str(n.uname, 80) }; }
+  private async signed(path: string, params: Record<string, string>, signal: AbortSignal): Promise<Obj> {
+    const nav = await this.nav(signal); const wbi = obj(nav.wbi_img);
+    const key = (v: unknown) => new URL(str(v)).pathname.split('/').pop()!.split('.')[0]!;
+    const query = signWbi(params, key(wbi.img_url), key(wbi.sub_url), Math.floor(this.now() / 1000));
+    return (await this.raw(API + path + '?' + query, signal, await this.credential())).data;
+  }
+  async video(bvid: string, signal: AbortSignal): Promise<VideoMaterial> {
+    if (!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid)) throw new PilotError('INVALID_BVID');
+    const { data } = await this.raw(API + '/x/web-interface/view?bvid=' + bvid, signal, await this.credential());
+    if (data.bvid !== bvid || data.state !== 0) throw new PilotError('VIDEO_UNAVAILABLE');
+    const aid = decimalId(data.aid), cid = decimalId(data.cid);
+    const player = await this.signed('/x/player/wbi/v2', { aid, cid }, signal);
+    const subs = list(obj(player.subtitle).subtitles).map(obj);
+    const preferred = subs.find(s => typeof s.lan === 'string' && /^zh|^ai-zh/.test(s.lan)) ?? subs[0];
+    let subtitle: string | null = null;
+    if (preferred) {
+      const rawUrl = str(preferred.subtitle_url); const url = new URL(rawUrl.startsWith('//') ? 'https:' + rawUrl : rawUrl);
+      if (url.protocol !== 'https:' || url.port || url.username || url.password || !(url.hostname === 'hdslb.com' || url.hostname.endsWith('.hdslb.com'))) throw new PilotError('SUBTITLE_TARGET_DENIED');
+      // Subtitle hosts never receive cookies. Only an API-returned HTTPS CDN URL is admitted.
+      const response = await this.fetcher(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]), redirect: 'error' });
+      if (!response.ok) throw new PilotError('SUBTITLE_UNAVAILABLE');
+      subtitle = list(obj(parseLossless(await boundedText(response))).body).map(v => str(obj(v).content, 2000)).join('\n').slice(0, 20_000);
+    }
+    return { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
+  }
+  async comments(aid: string, root: string, cursor: string | null, authenticated: boolean, signal: AbortSignal): Promise<CommentPage> {
+    decimalId(aid); decimalId(root);
+    let data: Obj;
+    if (root !== '0') {
+      const page = cursor ?? '1'; if (!/^[1-9]\d{0,5}$/.test(page)) throw new PilotError('INVALID_CURSOR');
+      data = (await this.raw(API + `/x/v2/reply/reply?type=1&oid=${aid}&root=${root}&ps=20&pn=${page}`, signal, authenticated ? await this.credential() : null)).data;
+      if (authenticated) requireWritable(data);
+      const rows = list(data.replies).map(v => commentOf(v, aid)); const p = obj(data.page);
+      if (rows.some(c => c.root !== root)) throw new PilotError('PLATFORM_TARGET_MISMATCH');
+      if (!Number.isSafeInteger(p.count) || !Number.isSafeInteger(p.num) || !Number.isSafeInteger(p.size) || p.num !== Number(page) || Number(p.size) < 1) throw new PilotError('PLATFORM_SCHEMA_CHANGED');
+      return { comments: rows, next: Number(p.num) * Number(p.size) < Number(p.count) ? String(Number(page) + 1) : null };
+    }
+    if (cursor && cursor.length > 2000) throw new PilotError('INVALID_CURSOR');
+    if (authenticated) data = await this.signed('/x/v2/reply/wbi/main', { type: '1', oid: aid, mode: '3', ps: '20', pagination_str: JSON.stringify({ offset: cursor ?? '' }), plat: '1', web_location: '1315875' }, signal);
+    else data = (await this.raw(API + `/x/v2/reply/main?type=1&oid=${aid}&mode=3&next=${cursor ?? '0'}&ps=20`, signal)).data;
+    if (authenticated) requireWritable(data);
+    const c = obj(data.cursor);
+    const next = c.is_end === true ? null : authenticated ? str(obj(c.pagination_reply).next_offset, 2000) : decimalId(c.next);
+    return { comments: list(data.replies).map(v => commentOf(v, aid)), next };
+  }
+  async send(target: SendTarget, text: string, signal: AbortSignal): Promise<SendReceipt> {
+    for (const id of [target.aid, target.root, target.parent]) decimalId(id);
+    if (!text.trim() || [...text].length > LIMITS.textLength) throw new PilotError('INVALID_COMMENT');
+    signal.throwIfAborted();
+    const c = await this.credential(); signal.throwIfAborted();
+    const body = new URLSearchParams({ type: '1', oid: target.aid, root: target.root, parent: target.parent, message: text, csrf: c.csrf });
+    const { data } = await this.raw(API + '/x/v2/reply/add', signal, c, body);
+    try {
+      const r = commentOf(data.reply, target.aid);
+      if (r.id === '0' || r.uid !== c.uid || r.root !== target.root || r.parent !== target.parent) throw new PilotError('SEND_OUTCOME_UNKNOWN');
+      return { id: r.id, root: r.root, parent: r.parent };
+    } catch { throw new PilotError('SEND_OUTCOME_UNKNOWN'); }
+  }
+  async verify(target: SendTarget, id: string, uid: string, signal: AbortSignal): Promise<Visibility> {
+    const check = async (authenticated: boolean): Promise<boolean | null> => {
+      try {
+        // Root response includes the root itself; no scanning a busy whole video to guess absence.
+        const rootId = target.root === '0' ? id : target.root;
+        let cursor: string | null = '1';
+        for (let page = 0; page < LIMITS.pages && cursor; page++) {
+          const { data } = await this.raw(API + `/x/v2/reply/reply?type=1&oid=${target.aid}&root=${rootId}&ps=20&pn=${cursor}`, signal, authenticated ? await this.credential() : null);
+          const candidates = [...list(data.replies), ...(data.root ? [data.root] : [])];
+          for (const raw of candidates) {
+            const c = commentOf(raw, target.aid);
+            if (c.id === id && c.uid === uid && c.root === target.root && c.parent === target.parent) return obj(raw).invisible === true ? null : true;
+          }
+          const p = obj(data.page); cursor = Number(p.num) * Number(p.size) < Number(p.count) ? String(Number(p.num) + 1) : null;
+        }
+      } catch { /* Failure or not found cannot establish remote absence. */ }
+      return null;
+    };
+    return { selfVisible: await check(true), publicVisible: signal.aborted ? null : await check(false) };
+  }
+  async loginStart(signal: AbortSignal): Promise<{ loginId: string; image: string; expiresAt: number }> {
+    const { data } = await this.raw(PASSPORT + '/x/passport-login/web/qrcode/generate?source=main-fe-header', signal);
+    const url = new URL(str(data.url));
+    if (url.protocol !== 'https:' || url.hostname !== 'passport.bilibili.com') throw new PilotError('LOGIN_SCHEMA_CHANGED');
+    this.login = { id: randomUUID(), key: str(data.qrcode_key, 200), expires: this.now() + 180_000, lastPoll: 0 };
+    return { loginId: this.login.id, image: await QRCode.toDataURL(url.href, { width: 240, margin: 2 }), expiresAt: this.login.expires };
+  }
+  async loginPoll(loginId: string, signal: AbortSignal): Promise<{ state: string; account?: Account }> {
+    const login = this.login;
+    if (!login || login.id !== loginId || this.now() >= login.expires) { this.login = null; return { state: 'expired' }; }
+    if (this.now() - login.lastPoll < 2000) return { state: 'waiting' };
+    login.lastPoll = this.now();
+    const { data, headers } = await this.raw(PASSPORT + '/x/passport-login/web/qrcode/poll?qrcode_key=' + encodeURIComponent(login.key) + '&source=main-fe-header', signal);
+    if (data.code === 86101) return { state: 'waiting' };
+    if (data.code === 86090) return { state: 'scanned' };
+    if (data.code === 86038) { this.login = null; return { state: 'expired' }; }
+    if (data.code !== 0) throw new PilotError('LOGIN_FAILED');
+    const cookies: Record<string, string> = {};
+    for (const header of headers.getSetCookie()) { const first = header.split(';')[0]!; const eq = first.indexOf('='); if (eq > 0) cookies[first.slice(0, eq)] = first.slice(eq + 1); }
+    // Some successful responses carry the same cookie values in their redirect query.
+    if (typeof data.url === 'string') {
+      const redirect = new URL(data.url);
+      if (!['passport.bilibili.com', 'www.bilibili.com'].includes(redirect.hostname)) throw new PilotError('LOGIN_SCHEMA_CHANGED');
+      for (const key of ['SESSDATA', 'bili_jct', 'DedeUserID']) if (!cookies[key]) { const value = redirect.searchParams.get(key); if (value) cookies[key] = value; }
+    }
+    const spi = await this.raw(API + '/x/frontend/finger/spi', signal);
+    const credential = credentialOf({ uid: cookies.DedeUserID, sessdata: cookies.SESSDATA, csrf: cookies.bili_jct, buvid3: spi.data.b_3 });
+    const checked = (await this.raw(API + '/x/web-interface/nav', signal, credential)).data;
+    if (checked.isLogin !== true || decimalId(checked.mid) !== credential.uid) throw new PilotError('ACCOUNT_CHANGED');
+    signal.throwIfAborted(); if (this.login !== login) throw new PilotError('LOGIN_CANCELLED');
+    await this.vault.write(credential); this.login = null;
+    return { state: 'authenticated', account: { uid: credential.uid, name: str(checked.uname, 80) } };
+  }
+  async logout(): Promise<void> { this.login = null; await this.vault.remove(); }
+}
+async function boundedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader(); if (!reader) throw new PilotError('PLATFORM_EMPTY_RESPONSE');
+  const chunks: Uint8Array[] = []; let size = 0;
+  try { while (true) { const { value, done } = await reader.read(); if (done) break; size += value.byteLength; if (size > 2_000_000) throw new PilotError('PLATFORM_RESPONSE_TOO_LARGE'); chunks.push(value); } }
+  finally { await reader.cancel().catch(() => {}); }
+  return Buffer.concat(chunks).toString('utf8');
+}

@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES2023", "module": "CommonJS", "moduleResolution": "Node",
-    "rootDir": "src/client", "outDir": "build/client", "strict": true,
+    "target": "ES2023", "module": "ESNext", "moduleResolution": "Bundler",
+    "rootDir": "src", "outDir": "build/client", "strict": true,
     "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
     "noUnusedLocals": true, "noUnusedParameters": true,
     "skipLibCheck": true, "types": ["react"]

@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PROJECT, RUN_BASE, ELECTRON, preflight, prepareRunDirectory,
+import { PROJECT, RUN_BASE, ELECTRON, prepareRunDirectory,
   buildChildEnvironment, superviseChild } from './desktop-core-smoke.mjs';
 import { assertFreshBundleTarget } from './bundle-install-guard.mjs';
 
@@ -31,7 +31,7 @@ async function probe(config, assertFreshBundleTarget) {
       kind: 'git', spec: 'https://github.com/Alice-Yuan/dsh-dafeiyu.git', host: 'github.com',
     });
     assert.equal(manifest.name, 'dsh-dafeiyu');
-    assert.match(manifest.description, /大肥鱼.*模拟原型/);
+    assert.match(manifest.description, /大肥鱼.*实验插件/);
     report.checks.push('official GitHub spec parser accepts repository URL', 'Chinese package description present');
     const paths = bundlePatchPaths(config.project, manifest.dsh.bundle);
     assert.deepEqual(paths, [config.patch]);
@@ -39,8 +39,15 @@ async function probe(config, assertFreshBundleTarget) {
     const warnings = [];
     const compose = layers => composeEntries(layers, message => warnings.push(message));
     const entries = compose(patches);
-    assert.deepEqual(entries, [{ id: 'dafeyu', name: 'dsh-dafeiyu' }]);
-    report.checks.push('exactly one inert plugin row');
+    assert.equal(entries.length, 3);
+    assert.deepEqual(entries[0], { id: 'dafeyu', name: 'dsh-dafeiyu' });
+    for (const [index, audience] of [[1, 'private'], [2, 'public']]) {
+      assert.equal(entries[index].id, 'dafeyu-preset-' + audience);
+      assert.equal(entries[index].name, '@deepseek-ai/dsh-agent-preset');
+      assert.equal(entries[index].config.id, 'dafeyu-' + audience);
+      assert.deepEqual(entries[index].config.plugins, [{ name: 'dsh-dafeiyu/policy', config: { audience } }]);
+    }
+    report.checks.push('one control row plus two explicitly restricted agent presets');
     const disable = [{ id: 'dafeyu', disabled: true }];
     assert.equal(compose([...patches, disable])[0].disabled, true);
     assert.equal(compose([...patches, disable, [{ id: 'dafeyu', disabled: false }]])[0].disabled, false);
@@ -107,7 +114,7 @@ async function probe(config, assertFreshBundleTarget) {
 }
 
 export async function checkDesktopBundle() {
-  await preflight(); // Checks executable path, Desktop/core baseline and unchanged empty host entry.
+  // This probe imports only the pinned official parser, never the now-active host entry.
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(ASAR)) digest.update(chunk);
   if (digest.digest('hex') !== ARCHIVE_SHA) throw new Error('REVIEWED_ARCHIVE_CHANGED');
@@ -130,7 +137,7 @@ export async function checkDesktopBundle() {
   try { parsed = JSON.parse(child.stdout.trim()); } catch { parsed = { status: 'FAIL', error: { code: 'INVALID_CHILD_REPORT' } }; }
   const status = child.terminationConfirmed && child.exitCode === 0 && !child.timedOut &&
     !child.outputLimited && !child.errorCode && parsed.status === 'PASS' ? 'PASS' : 'FAIL';
-  const result = { task: 'DFY-M1-016', test: 'V-M1-RENAME-BUNDLE', status, startedUtc, finishedUtc: new Date().toISOString(),
+  const result = { task: 'DFY-P1-004', test: 'V-P1-BUNDLE', status, startedUtc, finishedUtc: new Date().toISOString(),
     runDir, executable: ELECTRON, args: ['--expose-internals', probePath], environmentKeys: Object.keys(env).sort(),
     sourceHashes: { archive: ARCHIVE_SHA, appBoot: BOOT_SHA },
     projectHashes: Object.fromEntries(await Promise.all(['package.json', 'cordis.patch.yml', 'dist/host/plugin.js',

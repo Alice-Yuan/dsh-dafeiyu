@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { createRequire } from 'node:module';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { apply as hostApply } from '../dist/host/plugin.js';
+import { Context } from '@deepseek-ai/cordis';
 
 const require = createRequire(import.meta.url);
 test('V-M1-PACKAGE: lazy client registration, scoped settings and cleanup contract', async () => {
@@ -14,39 +15,44 @@ test('V-M1-PACKAGE: lazy client registration, scoped settings and cleanup contra
   assert.equal(rows.length, 1); assert.equal(rows[0].id, 'dsh-dafeiyu');
   assert.equal(requires, 0);
   const client = rows[0].factory(name => {
-    requires++; assert.equal(name, 'react'); return require(name);
+    requires++; assert.ok(['react', 'zod'].includes(name)); return require(name);
   });
-  assert.equal(requires, 1);
+  assert.equal(requires, 2);
   const effects = []; const registered = [];
-  client.apply({ slots: {
+  client.apply({ remote: { $mount(value) { assert.equal(value.package, 'dsh-dafeiyu'); return () => {}; }, dafeyu: {} }, slots: {
     inject(slot, fn) { assert.equal(slot, 'plugins.detail.section'); effects.push(fn()); },
     register(options, component) {
       registered.push({ options, component });
       return () => { registered.pop(); };
     },
   } });
-  assert.equal(registered[0].options.id, 'dafeyu-simulation');
+  assert.equal(registered[0].options.id, 'dafeyu-pilot');
   const component = registered[0].component;
-  assert.equal(component({ subject: { kind: 'bundle', pkg: { name: 'unrelated' } } }), null);
-  assert.equal(component({}), null);
+  assert.equal(renderToStaticMarkup(component({ subject: { kind: 'bundle', pkg: { name: 'unrelated' } } })), '');
+  assert.equal(renderToStaticMarkup(component({})), '');
   const html = renderToStaticMarkup(component({ subject: { kind: 'bundle', pkg: { name: 'dsh-dafeiyu' } } }));
-  assert.match(html, /假模型、假平台、模拟主人消息/);
+  assert.match(html, /尚未连接 Desktop 运行状态/);
   assert.match(html, /disabled/);
   assert.doesNotMatch(code, /node:|fetch\(|XMLHttpRequest|child_process/);
   effects.forEach(dispose => dispose());
   assert.equal(registered.length, 0);
 });
-test('V-M1-BOUNDARY: host entry creates no model, storage, timers or network', () => {
-  const logs = [];
-  hostApply({ logger: { info: text => logs.push(text) } });
-  assert.equal(logs.length, 1);
-  assert.match(logs[0], /真实模型、账号及自动活动均未接通/);
+test('V-M1-BOUNDARY: mounting the control service does not activate models or accounts', async () => {
+  const root = new Context();
+  const live = Object.fromEntries(Object.entries({ ownerUid: '', bvid: '', persona: 'Synthetic persona', diagnosticMarker: '' }).map(([k,v]) => [k, { get: () => v }]));
+  const fiber = root.plugin(ctx => { hostApply(ctx, live); });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(root.dafeyuControl);
+  assert.equal(root.dafeyuControl.storeValue, null);
+  assert.equal(root.dafeyuControl.modelValue, null);
+  assert.equal(root.dafeyuControl.platformValue, null);
+  await fiber.dispose();
 });
 test('V-M1-PACKAGE: manifest exports exist and package remains private', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.private, true);
   assert.equal(pkg.name, 'dsh-dafeiyu');
-  assert.match(pkg.description, /大肥鱼.*模拟原型/);
+  assert.match(pkg.description, /大肥鱼.*实验插件/);
   assert.equal(pkg.repository.url, 'git+https://github.com/Alice-Yuan/dsh-dafeiyu.git');
   for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack']) {
     assert.equal(pkg.scripts[hook], undefined);

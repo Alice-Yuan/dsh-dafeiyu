@@ -1,3 +1,23 @@
 - insert:
     - id: dafeyu
       name: dsh-dafeiyu
+    - id: dafeyu-preset-private
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dafeyu-private
+        name: 大肥鱼 · 主人会话
+        description: 受限私聊；首次验收最多一次私聊与一次活动汇报。
+        plugins:
+          - name: dsh-dafeiyu/policy
+            config:
+              audience: private
+    - id: dafeyu-preset-public
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dafeyu-public
+        name: 大肥鱼 · 公开判断
+        description: 仅供单视频执行器调用；不能从普通聊天触发公开发送。
+        plugins:
+          - name: dsh-dafeiyu/policy
+            config:
+              audience: public
