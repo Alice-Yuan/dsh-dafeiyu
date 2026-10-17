@@ -423,14 +423,19 @@ function DetailSection({ subject, ctx }) {
   const matches = subject.kind === "bundle" || subject.kind === "row" ? subject.pkg?.name === "dsh-dafeiyu" : subject.kind === "item" && subject.id === "dafeyu";
   return matches ? (0, import_react.createElement)(SettingsPanel, ctx ? { ctx } : {}) : null;
 }
-function apply(ctx) {
-  const unmount = ctx.remote.$mount(REMOTE);
-  ctx.effect?.(() => unmount);
-  ctx.slots.inject("plugins.detail.section", () => ctx.slots.register({
-    name: "plugins.detail.section",
-    id: "dafeyu-pilot",
-    order: 80
-  }, (props) => (0, import_react.createElement)(DetailSection, { ...props, ctx })));
+async function apply(ctx) {
+  const unmount = await ctx.remote.$mount(REMOTE);
+  const view = ctx.inject(["slots", "remote.dafeyu"], (ready) => {
+    ready.slots.inject("plugins.detail.section", () => ready.slots.register({
+      name: "plugins.detail.section",
+      id: "dafeyu-pilot",
+      order: 80
+    }, (props) => (0, import_react.createElement)(DetailSection, { ...props, ctx: ready })));
+  });
+  return async () => {
+    await view.dispose();
+    await unmount();
+  };
 }
 
 return module.exports;

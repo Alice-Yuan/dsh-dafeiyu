@@ -19,13 +19,15 @@ test('V-M1-PACKAGE: lazy client registration, scoped settings and cleanup contra
   });
   assert.equal(requires, 2);
   const effects = []; const registered = [];
-  client.apply({ remote: { $mount(value) { assert.equal(value.package, 'dsh-dafeiyu'); return () => {}; }, dafeyu: {} }, slots: {
+  const fakeContext = { remote: { async $mount(value) { assert.equal(value.package, 'dsh-dafeiyu'); return async () => {}; }, dafeyu: {} },
+    inject(names, apply) { assert.deepEqual(Array.from(names), ['slots', 'remote.dafeyu']); apply(this); return { dispose: async () => { effects.forEach(dispose => dispose()); } }; }, slots: {
     inject(slot, fn) { assert.equal(slot, 'plugins.detail.section'); effects.push(fn()); },
     register(options, component) {
       registered.push({ options, component });
       return () => { registered.pop(); };
     },
-  } });
+  } };
+  const disposeClient = await client.apply(fakeContext);
   assert.equal(registered[0].options.id, 'dafeyu-pilot');
   const component = registered[0].component;
   assert.equal(renderToStaticMarkup(component({ subject: { kind: 'bundle', pkg: { name: 'unrelated' } } })), '');
@@ -34,7 +36,7 @@ test('V-M1-PACKAGE: lazy client registration, scoped settings and cleanup contra
   assert.match(html, /尚未连接 Desktop 运行状态/);
   assert.match(html, /disabled/);
   assert.doesNotMatch(code, /node:|fetch\(|XMLHttpRequest|child_process/);
-  effects.forEach(dispose => dispose());
+  await disposeClient();
   assert.equal(registered.length, 0);
 });
 test('V-M1-BOUNDARY: mounting the control service does not activate models or accounts', async () => {

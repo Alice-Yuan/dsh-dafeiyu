@@ -7,8 +7,8 @@ export const inject = ['slots', 'remote'];
 interface Subject { kind: string; id?: string; pkg?: { name?: string } }
 interface DetailProps { subject?: Subject }
 export interface ClientContext {
-  remote: { $mount(contribution: unknown): () => void; dafeyu: Record<Method, (request: unknown, signal?: AbortSignal) => Promise<{ ok: boolean; value?: any; error?: { message?: string } }>> };
-  effect?(fn: () => (() => void)): unknown;
+  remote: { $mount(contribution: unknown): Promise<() => Promise<void>>; dafeyu: Record<Method, (request: unknown, signal?: AbortSignal) => Promise<{ ok: boolean; value?: any; error?: { message?: string } }>> };
+  inject(names: string[], apply: (ctx: ClientContext) => void): { dispose(): Promise<void> };
   slots: {
     inject(name: string, factory: () => unknown): unknown;
     register(options: { name: string; id: string; order: number },
@@ -109,10 +109,14 @@ export function DetailSection({ subject, ctx }: DetailProps & { ctx?: ClientCont
     : subject.kind === 'item' && subject.id === 'dafeyu';
   return matches ? h(SettingsPanel, ctx ? { ctx } : {}) : null;
 }
-export function apply(ctx: ClientContext): void {
-  const unmount = ctx.remote.$mount(REMOTE);
-  ctx.effect?.(() => unmount);
-  ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
-    name: 'plugins.detail.section', id: 'dafeyu-pilot', order: 80,
-  }, props => h(DetailSection, { ...props, ctx })));
+export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
+  const unmount = await ctx.remote.$mount(REMOTE);
+  // Namespaces are separate Cordis services in Desktop 0.2.1-rc.2.
+  // Mount first, then use the namespace from an explicitly injected child context.
+  const view = ctx.inject(['slots', 'remote.dafeyu'], ready => {
+    ready.slots.inject('plugins.detail.section', () => ready.slots.register({
+      name: 'plugins.detail.section', id: 'dafeyu-pilot', order: 80,
+    }, props => h(DetailSection, { ...props, ctx: ready })));
+  });
+  return async () => { await view.dispose(); await unmount(); };
 }

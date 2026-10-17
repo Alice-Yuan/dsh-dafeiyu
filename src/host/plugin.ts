@@ -72,7 +72,7 @@ export class DaFeiYuControl extends TypertRemoteService {
         configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
         busy: this.runnerValue?.busy ?? false, run: store.runs()[0] ?? null, actions: store.actions(),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
-        diagnostic: { version: '0.1.0-alpha.1', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+        diagnostic: { version: '0.1.0-alpha.2', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
     }, false);
   }
   @Remote

@@ -18,7 +18,7 @@ async function probe(config) {
   const fs = await import('node:fs/promises');
   const module = pkg => import(pathToFileURL(join(config.asar, 'dsh/node_modules/@deepseek-ai', pkg, 'lib/index.js')).href);
   const report = { status: 'FAIL', checks: [], electron: process.versions.electron, node: process.versions.node, model: 'synthetic-only' };
-  let ctx, model, store;
+  let ctx, model, store, clientCtx;
   try {
     // No real profile, provider credentials, HTTP or browser state enters this process.
     globalThis.fetch = () => { throw new Error('NETWORK_FORBIDDEN_IN_PROBE'); };
@@ -108,13 +108,43 @@ async function probe(config) {
     await entry.update({ disabled: false }); await ctx.loader.await();
     const resumed = await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'status', args: { request: {} }, peer });
     assert.equal(resumed.budget.used, 1); assert.equal(resumed.privateSessionId, chat.sessionId);
+    // Exercise the actual Client Remote namespace guard, not just a plain-object UI stub.
+    clientCtx = new Context();
+    await clientCtx.plugin((await module('dsh-typert-registry')).default).await();
+    const views = [];
+    new class extends Service {
+      constructor() { super(clientCtx, 'connection'); }
+      interactions = 'none';
+      rpc = { open: async function* () {}, call: async (_base, endpoint, payload, signal) => {
+        const [namespace, method] = endpoint.split('/');
+        return { ok: true, value: await ctx.typertGateway.invoke({ namespace, method, args: payload.args, peer, signal }) };
+      } };
+    }();
+    new class extends Service {
+      constructor() { super(clientCtx, 'slots'); }
+      inject(_name, factory) { const dispose = factory(); this.ctx.effect(() => dispose); }
+      register(_options, component) { views.push(component); return () => { views.splice(views.indexOf(component), 1); }; }
+    }();
+    const clientGateway = await import(pathToFileURL(join(config.asar, 'dsh/node_modules/@deepseek-ai/dsh-api-gateway/lib/client.node.js')).href);
+    await clientCtx.plugin(clientGateway).await();
+    const { runInNewContext } = await import('node:vm'), { createRequire } = await import('node:module');
+    const require = createRequire(join(config.project, 'package.json')); let clientModule;
+    runInNewContext(await fs.readFile(join(config.project, 'dist/client.js'), 'utf8'), { window: { __ModuleLoader__: { load(row) { clientModule = row.factory(require); } } } });
+    const clientFiber = clientCtx.plugin(clientModule); await clientFiber.await();
+    assert.equal(views.length, 1);
+    const view = views[0]({ subject: { kind: 'bundle', pkg: { name: 'dsh-dafeiyu' } } });
+    const clientStatus = await view.props.ctx.remote.dafeyu.status({});
+    assert.equal(clientStatus.ok, true); assert.equal(clientStatus.value.diagnostic.marker, 'reload-fixture');
+    await clientFiber.dispose(); assert.equal(views.length, 0); assert.equal(clientCtx.get('remote.dafeyu'), undefined);
+    await clientCtx.fiber.dispose(); clientCtx = null;
+    report.checks.push('actual Client Remote mounts namespace before injected view; rendered view context can call authenticated Host status; unload removes view and namespace');
     const summary = await ctx.dafeyuControl.model().ask({ purpose: 'summary', persona: pilotConfig.persona, prompt: 'RESUMED_SUMMARY' }, AbortSignal.timeout(6000));
     assert.equal(summary.sessionId, chat.sessionId); assert.equal(captures.at(-1).tools?.length ?? 0, 0);
     await entry.fiber.dispose(); assert.equal(ctx.get('dafeyuControl'), undefined);
     report.checks.push('actual ConfigEditor writes isolated profile patch; stale revision rejected; volatile update keeps service alive; cold resume retains restrictions and quotas; no HTTP server started');
     report.status = 'PASS';
   } catch (error) { report.error = { message: error.message, stack: error.stack }; }
-  finally { await model?.dispose(); store?.close(); await ctx?.fiber.dispose(); }
+  finally { await clientCtx?.fiber.dispose(); await model?.dispose(); store?.close(); await ctx?.fiber.dispose(); }
   process.stdout.write(JSON.stringify(report) + '\n'); process.exitCode = report.status === 'PASS' ? 0 : 1;
 }
 const file = join(dir, 'probe.mjs'); await writeFile(file, `(${probe.toString()})(${JSON.stringify({ asar: ASAR, project: PROJECT, dir })});\n`, { flag: 'wx' });
