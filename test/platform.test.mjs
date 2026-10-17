@@ -115,6 +115,17 @@ test('QR result exposes only account identity; credentials pass server validatio
   assert.equal((await adapter.loginPoll(next.loginId, signal())).state, 'expired'); assert.equal(polls, 1);
 });
 
+test('QR login admits the current official account page and rejects URL or key substitution', async () => {
+  const key = 'synthetic-current-key';
+  const official = 'https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=' + key;
+  const make = url => new Bilibili(vault(), async () => ok({ url, qrcode_key: key }));
+  assert.match((await make(official).loginStart(signal())).image, /^data:image\/png;base64,/);
+  for (const url of [official.replace('https:', 'http:'), official.replace('account.bilibili.com', 'account.bilibili.com.evil.test'),
+    official.replace('/scan-web', '/other'), official.replace(key, 'wrong-key'), official.replace('https://', 'https://user@'), official + '#fragment']) {
+    await assert.rejects(make(url).loginStart(signal()), /LOGIN_SCHEMA_CHANGED/);
+  }
+});
+
 test('Windows CurrentUser DPAPI vault persists only ciphertext, reopens and deletes synthetic material', { skip: process.platform !== 'win32' }, async () => {
   await mkdir(resolve('tmp/tests'), { recursive: true }); const dir = await mkdtemp(resolve('tmp/tests/vault-')); const file = join(dir, 'synthetic.dpapi');
   const storage = new WindowsVault(file); assert.equal(await storage.read(), null);

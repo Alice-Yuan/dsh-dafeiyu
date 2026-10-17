@@ -214,9 +214,12 @@ export class Bilibili {
     async loginStart(signal) {
         const { data } = await this.raw(PASSPORT + '/x/passport-login/web/qrcode/generate?source=main-fe-header', signal);
         const url = new URL(str(data.url));
-        if (url.protocol !== 'https:' || url.hostname !== 'passport.bilibili.com')
+        const key = str(data.qrcode_key, 200);
+        const accountPage = url.origin === 'https://account.bilibili.com' && url.pathname === '/h5/account-h5/auth/scan-web' && url.searchParams.get('qrcode_key') === key;
+        if (url.protocol !== 'https:' || url.port || url.username || url.password || url.hash ||
+            (url.origin !== PASSPORT && !accountPage) || !key)
             throw new PilotError('LOGIN_SCHEMA_CHANGED');
-        this.login = { id: randomUUID(), key: str(data.qrcode_key, 200), expires: this.now() + 180_000, lastPoll: 0 };
+        this.login = { id: randomUUID(), key, expires: this.now() + 180_000, lastPoll: 0 };
         return { loginId: this.login.id, image: await QRCode.toDataURL(url.href, { width: 240, margin: 2 }), expiresAt: this.login.expires };
     }
     async loginPoll(loginId, signal) {

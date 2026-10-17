@@ -1,6 +1,6 @@
 # 官方 Desktop 安装与试跑
 
-插件名称：**大肥鱼（DaFeiYu）**；包名：`dsh-dafeiyu`；版本：`0.1.0-alpha.3`。兼容基线为 Windows DeepSeek Harness Desktop **0.2.1-rc.2**。
+插件名称：**大肥鱼（DaFeiYu）**；包名：`dsh-dafeiyu`；版本：`0.1.0-alpha.4`。兼容基线为 Windows DeepSeek Harness Desktop **0.2.1-rc.2**。
 
 ## 安装
 
