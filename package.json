@@ -1,0 +1,59 @@
+{
+  "name": "dsh-dafeiyu",
+  "version": "0.0.1-mock.2",
+  "private": true,
+  "description": "大肥鱼：寄宿于 DeepSeek Harness Desktop 的个人 AI 插件，探索持续人格、长期记忆与主动互动。当前为本地模拟原型，尚未接通真实模型和 B站。",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alice-Yuan/dsh-dafeiyu.git"
+  },
+  "homepage": "https://github.com/Alice-Yuan/dsh-dafeiyu#readme",
+  "bugs": {
+    "url": "https://github.com/Alice-Yuan/dsh-dafeiyu/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "exports": {
+    ".": "./dist/host/plugin.js",
+    "./client": "./dist/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "README.md",
+    "docs/desktop-install.md",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "build": "tsc && tsc -p tsconfig.client.json && node scripts/build-client.mjs",
+    "test": "node --test test/*.test.mjs",
+    "demo": "node dist/demo.js",
+    "preview": "node scripts/render-preview.mjs",
+    "bundle:check": "node scripts/check-desktop-bundle.mjs",
+    "check": "npm run typecheck && npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "@types/react": "19.1.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "typescript": "5.9.3"
+  }
+}

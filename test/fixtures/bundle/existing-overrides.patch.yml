@@ -1,0 +1,7 @@
+- id: existing-alpha
+  disabled: true
+- id: existing-beta
+  config:
+    count: 7
+    options: [b, c]
+    text: 合成覆盖保留

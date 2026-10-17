@@ -1,0 +1,5 @@
+- insert:
+    - id: dafeyu
+      name: example-unrelated
+      config:
+        preserve: synthetic-existing-value

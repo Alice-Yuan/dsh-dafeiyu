@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "module": "CommonJS", "moduleResolution": "Node",
+    "rootDir": "src/client", "outDir": "build/client", "strict": true,
+    "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true, "noUnusedParameters": true,
+    "skipLibCheck": true, "types": ["react"]
+  },
+  "include": ["src/client/**/*.ts"]
+}

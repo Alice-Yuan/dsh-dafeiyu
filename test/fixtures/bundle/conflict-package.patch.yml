@@ -1,0 +1,5 @@
+- insert:
+    - id: existing-alias
+      name: dsh-dafeyu
+      config:
+        preserve: synthetic-existing-value

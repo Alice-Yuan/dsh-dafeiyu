@@ -1,0 +1,1 @@
+{"version":3,"file":"plugin.js","sourceRoot":"","sources":["../../src/host/plugin.ts"],"names":[],"mappings":"AAAA,MAAM,CAAC,MAAM,IAAI,GAAG,QAAQ,CAAC;AAC7B,MAAM,CAAC,MAAM,MAAM,GAAsB,EAAE,CAAC;AAM5C,MAAM,UAAU,KAAK,CAAC,GAAgB;IACpC,GAAG,CAAC,MAAM,CAAC,IAAI,CAAC,mCAAmC,CAAC,CAAC;IACrD,qGAAqG;AACvG,CAAC"}

@@ -1,0 +1,6 @@
+- insert:
+    - id: dafeyu
+      name: dsh-dafeyu
+      disabled: true
+      config:
+        preserve: synthetic-existing-value

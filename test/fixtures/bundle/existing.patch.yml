@@ -1,0 +1,19 @@
+- insert:
+    - id: existing-alpha
+      name: example-alpha
+      config:
+        text: 合成配置保持
+        nested:
+          id: dafeyu
+          enabled: false
+          items: [1, two, null]
+    - id: existing-group
+      name: example-group
+      group: true
+      config:
+        - id: existing-beta
+          name: example-beta
+          disabled: true
+          config:
+            count: 3
+            options: [a, b]

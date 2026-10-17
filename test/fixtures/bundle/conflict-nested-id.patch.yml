@@ -1,0 +1,10 @@
+- insert:
+    - id: existing-group
+      name: example-group
+      group: true
+      config:
+        - id: dafeyu
+          name: example-unrelated
+          disabled: true
+          config:
+            preserve: synthetic-existing-value
