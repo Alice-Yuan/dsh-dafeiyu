@@ -1,0 +1,40 @@
+# Generated dependencies and build output
+node_modules/
+# dist is committed in the public distribution for Desktop Git installations.
+dist/settings-preview.html
+build/
+coverage/
+*.tsbuildinfo
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local runtime state; business data should live outside the repository
+/runtime-data/
+/logs/
+/tmp/
+/artifacts/
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Local secrets; example files must contain field descriptions only
+.env
+.env.*
+!.env.example
+/.secrets/
+*credential*.json
+*cookies*.json
+*.pem
+*.key
+
+# OS noise
+.DS_Store
+Thumbs.db
