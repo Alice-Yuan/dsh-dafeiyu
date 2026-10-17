@@ -41,6 +41,7 @@ async function probe(config) {
     const { defineContentToolFixture } = await module('dsh-tools');
     ctx.tools.register(defineContentToolFixture({ name: 'forbidden_shell_fixture', description: 'Synthetic tool that must never be available', parameters: {}, execute() { throw new Error('TOOL_EXECUTED'); } }));
     ctx.systemPrompt.context({ name: 'synthetic:private', order: 0, text: 'GLOBAL_PRIVATE_CANARY' });
+    ctx.systemPrompt.context({ name: 'working-directory:current', order: 1, required: true, text: 'HOST_REQUIRED_DIRECTORY_CANARY' });
     const captures = [];
     const { LlmAdapter } = await module('dsh-llm');
     class Adapter extends LlmAdapter { async *stream(request) { captures.push(request); yield { type: 'text-delta', index: 0, text: 'Synthetic response' }; yield { type: 'finish', reason: { kind: 'stop' } }; } }
@@ -53,6 +54,7 @@ async function probe(config) {
     assert.equal(first.text, 'Synthetic response'); assert.equal(captures[0].maxTokens, 2048);
     assert.equal(captures[0].provider, 'synthetic'); assert.equal(captures[0].tools?.length ?? 0, 0);
     assert.ok(!JSON.stringify(captures[0]).includes('GLOBAL_PRIVATE_CANARY'));
+    assert.ok(!JSON.stringify(captures[0]).includes('HOST_REQUIRED_DIRECTORY_CANARY'));
     report.checks.push('actual Agent loop emits a correlated response; default route and maxTokens=2048 enforced');
     await model.recordReport('SYNTHETIC_RECEIPT'); assert.equal(captures.length, 1);
     await model.dispose();
@@ -63,6 +65,8 @@ async function probe(config) {
     assert.ok(JSON.stringify(captures[1].messages).includes('SYNTHETIC_RECEIPT'));
     const third = await model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'SYNTHETIC_PUBLIC' }, sig);
     assert.notEqual(third.sessionId, first.sessionId); assert.ok(!JSON.stringify(captures[2]).includes('SYNTHETIC_PRIVATE_CANARY'));
+    assert.ok(!JSON.stringify(captures[2]).includes('HOST_REQUIRED_DIRECTORY_CANARY'));
+    report.checks.push('required working-directory context is shadowed in private/public agent scopes');
     assert.equal(store.budget().used, 3);
     await assert.rejects(model.ask({ purpose: 'private', persona: pilotConfig.persona, prompt: 'OVER_BUDGET' }, sig));
     assert.equal(captures.length, 3);

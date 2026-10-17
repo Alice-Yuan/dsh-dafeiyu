@@ -1,6 +1,6 @@
 # 官方 Desktop 安装与试跑
 
-插件名称：**大肥鱼（DaFeiYu）**；包名：`dsh-dafeiyu`；版本：`0.1.0-alpha.2`。兼容基线为 Windows DeepSeek Harness Desktop **0.2.1-rc.2**。
+插件名称：**大肥鱼（DaFeiYu）**；包名：`dsh-dafeiyu`；版本：`0.1.0-alpha.3`。兼容基线为 Windows DeepSeek Harness Desktop **0.2.1-rc.2**。
 
 ## 安装
 
@@ -27,5 +27,5 @@
 - `pilot.sqlite` 保存主人绑定、预算、事件 ID、发送状态与程序回执；没有自动清理或重置按钮，避免误续跑。聊天和公开生成会话由 DSH 持久化。保留期限/清理另行由主人决定。
 - 平台接口可能变化或触发风控；此时停止并显示错误，不尝试绕过。无字幕时仅使用标题、简介和评论材料，不声称看过完整视频。
 - 私聊会话正在被另一宿主控制器占用时可能显示 `SESSION_OPEN_IN_NATIVE_CHAT`；程序回执仍可写入已存在会话，模型汇报失败会明确显示。
-- 当前验证覆盖自动故障测试及已安装 SDK 的隔离 Agent/JSONL/Gateway/Loader/ConfigEditor 流程；配置在隔离 profile 确实落盘并重载。真实 Desktop GUI/profile、实际模型与账号操作应分项验收，尚不能宣称完整产品可用。
+- 已在 Desktop 0.2.1-rc.2 完成官方 Git 安装、插件运行、设置保存/读取及一次真实默认模型私聊。自动故障测试和隔离 SDK 流程另行验证预算、取消、恢复与上下文限制。账号扫码、目标视频及公开发送尚待真实验收，尚不能宣称完整产品可用。
 

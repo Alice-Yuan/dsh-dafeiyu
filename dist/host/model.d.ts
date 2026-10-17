@@ -55,6 +55,13 @@ export interface PolicyContext {
             interpolate: boolean;
             text: () => string;
         }): unknown;
+        context(context: {
+            name: string;
+            order: number;
+            required: boolean;
+            interpolate: boolean;
+            text: string;
+        }): unknown;
         suppressRuntimeContext(): unknown;
     };
     on(name: string, fn: (...args: any[]) => unknown): () => void;
