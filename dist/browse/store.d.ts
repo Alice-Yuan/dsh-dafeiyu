@@ -4,6 +4,8 @@ export declare class BrowseStore {
     private readonly pilot;
     constructor(pilot: PilotStore);
     latest(): BrowseRun | null;
+    run(id: string): BrowseRun | null;
+    reading(account: string, bvid: string): Reading | null;
     save(run: BrowseRun): void;
     seen(account: string, bvid: string): boolean;
     record(reading: Reading, run: BrowseRun): void;

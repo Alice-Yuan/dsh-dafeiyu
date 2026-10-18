@@ -32,7 +32,7 @@ module.exports = __toCommonJS(index_exports);
 var import_react = require("react");
 
 // src/shared/remote.ts
-var import_zod = require("zod");
+var import_zod2 = require("zod");
 
 // node_modules/@deepseek-ai/dsh-typert-protocol/lib/types/remote-info.js
 function createTypertRemoteInfo(spec, zod) {
@@ -181,29 +181,43 @@ var ResultValue = class {
   }
 };
 
+// src/browse/policy.ts
+var import_zod = require("zod");
+var browsePolicySchema = import_zod.z.object({
+  perDay: import_zod.z.number().int().min(0).max(50),
+  commentPerRound: import_zod.z.number().int().min(0).max(20),
+  replyPerRound: import_zod.z.number().int().min(1).max(10),
+  autoComment: import_zod.z.literal(false),
+  replyToComments: import_zod.z.literal(false)
+}).strict();
+var DEFAULT_BROWSE_POLICY = Object.freeze({ perDay: 5, commentPerRound: 1, replyPerRound: 1, autoComment: false, replyToComments: false });
+var REFERENCE_LIMITS = Object.freeze({ commentChars: 150, replyChars: 100, threadDays: 7, threads: 8 });
+
 // src/shared/remote.ts
-var configSchema = import_zod.z.object({ ownerUid: import_zod.z.string().max(25), bvid: import_zod.z.string().max(12), persona: import_zod.z.string().max(2e3), diagnosticMarker: import_zod.z.string().max(80) }).strict();
+var configSchema = import_zod2.z.object({ ownerUid: import_zod2.z.string().max(25), bvid: import_zod2.z.string().max(12), persona: import_zod2.z.string().max(2e3), diagnosticMarker: import_zod2.z.string().max(80) }).strict();
 var REQUESTS = {
-  status: import_zod.z.object({}).strict(),
-  saveConfig: import_zod.z.object({ config: configSchema, revision: import_zod.z.string().max(64) }).strict(),
-  loginStart: import_zod.z.object({}).strict(),
-  loginPoll: import_zod.z.object({ loginId: import_zod.z.string().uuid() }).strict(),
-  logout: import_zod.z.object({}).strict(),
-  preflight: import_zod.z.object({}).strict(),
-  browse: import_zod.z.object({ keyword: import_zod.z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
-  browseHistory: import_zod.z.object({}).strict(),
-  checkOwnerRequest: import_zod.z.object({}).strict(),
-  models: import_zod.z.object({}).strict(),
-  saveModel: import_zod.z.object({ provider: import_zod.z.string().min(1).max(200), model: import_zod.z.string().min(1).max(300) }).strict(),
-  inspectVideo: import_zod.z.object({}).strict(),
-  calibrateVideo: import_zod.z.object({ revision: import_zod.z.string().regex(/^[a-f0-9]{64}$/), reallocateOnePublicRequest: import_zod.z.literal(true) }).strict(),
-  videoEvidence: import_zod.z.object({}).strict(),
-  reviewVideo: import_zod.z.object({ revision: import_zod.z.string().regex(/^[a-f0-9]{64}$/), decision: import_zod.z.enum(["approved", "rejected"]), note: import_zod.z.string().max(1e3) }).strict(),
-  chat: import_zod.z.object({ text: import_zod.z.string().min(1).max(4e3) }).strict(),
-  start: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
-  startMediaTrial: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
-  stop: import_zod.z.object({}).strict(),
-  reconcile: import_zod.z.object({}).strict()
+  status: import_zod2.z.object({}).strict(),
+  saveConfig: import_zod2.z.object({ config: configSchema, revision: import_zod2.z.string().max(64) }).strict(),
+  loginStart: import_zod2.z.object({}).strict(),
+  loginPoll: import_zod2.z.object({ loginId: import_zod2.z.string().uuid() }).strict(),
+  logout: import_zod2.z.object({}).strict(),
+  preflight: import_zod2.z.object({}).strict(),
+  browse: import_zod2.z.object({ keyword: import_zod2.z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/), accountUid: import_zod2.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  browseHistory: import_zod2.z.object({}).strict(),
+  saveBrowsePolicy: import_zod2.z.object({ policy: browsePolicySchema, revision: import_zod2.z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+  curateBrowse: import_zod2.z.object({ runId: import_zod2.z.string().uuid(), accountUid: import_zod2.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  checkOwnerRequest: import_zod2.z.object({}).strict(),
+  models: import_zod2.z.object({}).strict(),
+  saveModel: import_zod2.z.object({ provider: import_zod2.z.string().min(1).max(200), model: import_zod2.z.string().min(1).max(300) }).strict(),
+  inspectVideo: import_zod2.z.object({}).strict(),
+  calibrateVideo: import_zod2.z.object({ revision: import_zod2.z.string().regex(/^[a-f0-9]{64}$/), reallocateOnePublicRequest: import_zod2.z.literal(true) }).strict(),
+  videoEvidence: import_zod2.z.object({}).strict(),
+  reviewVideo: import_zod2.z.object({ revision: import_zod2.z.string().regex(/^[a-f0-9]{64}$/), decision: import_zod2.z.enum(["approved", "rejected"]), note: import_zod2.z.string().max(1e3) }).strict(),
+  chat: import_zod2.z.object({ text: import_zod2.z.string().min(1).max(4e3) }).strict(),
+  start: import_zod2.z.object({ revision: import_zod2.z.string().max(64), accountUid: import_zod2.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  startMediaTrial: import_zod2.z.object({ revision: import_zod2.z.string().max(64), accountUid: import_zod2.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  stop: import_zod2.z.object({}).strict(),
+  reconcile: import_zod2.z.object({}).strict()
 };
 var REMOTE = createTypertRemoteInfo({
   package: "dsh-dafeiyu",
@@ -214,11 +228,11 @@ var REMOTE = createTypertRemoteInfo({
       invocation: { kind: "direct" },
       parameters: [{ name: "request", source: "json", codec, strictCodec: codec }],
       cancellation: { parameter: "signal" },
-      result: { mode: "strict", typeSymbol: `dsh-dafeiyu#${method}:result`, create: () => import_zod.z.json() }
+      result: { mode: "strict", typeSymbol: `dsh-dafeiyu#${method}:result`, create: () => import_zod2.z.json() }
     };
     return [`dafeyu/${method}`, spec];
   }))
-}, import_zod.z);
+}, import_zod2.z);
 
 // src/pilot/contracts.ts
 var LIMITS = Object.freeze({
@@ -258,6 +272,9 @@ function SettingsPanel({ ctx }) {
   const [keyword, setKeyword] = (0, import_react.useState)("");
   const [readings, setReadings] = (0, import_react.useState)([]);
   const [browsing, setBrowsing] = (0, import_react.useState)(false);
+  const [browsePolicy, setBrowsePolicy] = (0, import_react.useState)({ ...DEFAULT_BROWSE_POLICY });
+  const [policyRevision, setPolicyRevision] = (0, import_react.useState)("");
+  const policyDirty = (0, import_react.useRef)(false);
   const mounted = (0, import_react.useRef)(true);
   const call = async (method, request = {}, signal) => {
     if (!ctx) throw new Error("\u5C1A\u672A\u8FDE\u63A5 Desktop \u5BBF\u4E3B");
@@ -269,6 +286,10 @@ function SettingsPanel({ ctx }) {
     const next = await call("status", {}, signal);
     if (!mounted.current) return;
     setStatus(next);
+    if (!policyDirty.current && next.browseSettings) {
+      setBrowsePolicy(next.browseSettings.policy);
+      setPolicyRevision(next.browseSettings.revision);
+    }
     if (!dirty.current) {
       setDraft(next.config);
       setRevision(next.revision);
@@ -357,6 +378,17 @@ function SettingsPanel({ ctx }) {
   );
   const visible = (value) => value === true ? "\u5DF2\u89C2\u5BDF\u5230" : "\u672A\u786E\u8BA4";
   const readState = (value) => ({ subtitle: "\u5DF2\u53D6\u5F97\u5B57\u5E55\uFF0C\u5C1A\u672A\u7531\u6A21\u578B\u5224\u65AD", "no-subtitle": "\u65E0\u5B57\u5E55\uFF0C\u8DF3\u8FC7", seen: "\u8FD1\u671F\u5DF2\u8BFB\uFF0C\u8DF3\u8FC7", deferred: "\u8FBE\u5230\u672C\u6279\u8BFB\u53D6\u4E0A\u9650", failed: "\u8BFB\u53D6\u5931\u8D25" })[value] ?? value;
+  const latestPreview = status?.browseUsage?.latest;
+  const curated = latestPreview?.state === "completed" && latestPreview.kind === "curation" ? latestPreview.result : null;
+  const limitField = (label, key, min, max) => (0, import_react.createElement)(
+    "label",
+    { style: { display: "block", margin: "8px 0" } },
+    label + " ",
+    (0, import_react.createElement)("input", { type: "number", min, max, value: browsePolicy[key], onChange: (e) => {
+      policyDirty.current = true;
+      setBrowsePolicy((p) => ({ ...p, [key]: Number(e.target.value) }));
+    } })
+  );
   let videoText = "", reviewLabel = "\u5F85\u590D\u6838", reviewed = false;
   if (status?.videoReview) {
     try {
@@ -471,6 +503,41 @@ function SettingsPanel({ ctx }) {
       (0, import_react.createElement)("p", null, `UP\u4E3B\uFF1A${item.author} \xB7 ${new Date(item.at).toLocaleString()}${item.truncated ? " \xB7 \u5B57\u5E55\u8FBE\u5230\u4FDD\u7559\u4E0A\u9650\uFF0C\u53EF\u80FD\u622A\u65AD" : ""}`),
       (0, import_react.createElement)("a", { href: `https://www.bilibili.com/video/${item.bvid}/`, target: "_blank", rel: "noreferrer" }, "\u6253\u5F00\u6765\u6E90\u89C6\u9891"),
       (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 300, overflow: "auto" } }, item.subtitle ?? "\u6CA1\u6709\u5B57\u5E55\uFF0C\u672A\u4E0B\u8F7D\u5A92\u4F53\u6216\u63A8\u6D4B\u89C6\u9891\u5185\u5BB9\u3002")
+    )),
+    (0, import_react.createElement)("h3", null, "\u7CBE\u9009\u4E0E\u8349\u7A3F \xB7 \u4EC5\u9884\u89C8"),
+    (0, import_react.createElement)("p", null, "\u6CBF\u7528\u53C2\u8003\u9879\u76EE\u7684\u53D6\u820D\uFF1A\u503C\u5F97\u5360\u7528\u4E00\u6B21\u6CE8\u610F\u529B\u624D\u7CBE\u9009\uFF0C\u53EF\u4EE5\u5168\u90E8\u8DF3\u8FC7\u3002\u6BCF\u65E5\u989D\u5EA6\u6309\u5317\u4EAC\u65F6\u95F4\u7EDF\u8BA1\u7CBE\u9009\u89C6\u9891\uFF0C\u6D4F\u89C8\u548C\u6A21\u578B\u8BF7\u6C42\u53E6\u8BA1\u3002"),
+    (0, import_react.createElement)(
+      "fieldset",
+      { disabled: disabled || !!status?.busy },
+      (0, import_react.createElement)("legend", null, "\u6D4F\u89C8\u989D\u5EA6\u4E0E\u56DE\u590D\u89C4\u5219"),
+      limitField("\u6BCF\u5929\u6700\u591A\u7CBE\u9009\uFF080\u8868\u793A\u6682\u505C\u7CBE\u9009\uFF09", "perDay", 0, 50),
+      limitField("\u6BCF\u8F6E\u6700\u591A\u8BC4\u8BBA\u8349\u7A3F\uFF080\u8868\u793A\u4E0D\u751F\u6210\uFF09", "commentPerRound", 0, 20),
+      limitField("\u6BCF\u8F6E\u6700\u591A\u56DE\u590D\u8349\u7A3F", "replyPerRound", 1, 10),
+      button("\u4FDD\u5B58\u6D4F\u89C8\u9650\u989D", () => act(async () => {
+        await call("saveBrowsePolicy", { policy: browsePolicy, revision: policyRevision });
+        policyDirty.current = false;
+        setNotice("\u6D4F\u89C8\u9650\u989D\u5DF2\u4FDD\u5B58\uFF0C\u5DF2\u6709\u6D88\u8017\u4FDD\u7559\uFF1B\u672A\u8C03\u7528\u6A21\u578B\u6216\u5F00\u542F\u53D1\u9001\u3002");
+      }), !policyRevision),
+      button("\u91CD\u65B0\u8BFB\u53D6\u6D4F\u89C8\u9650\u989D", () => act(async () => {
+        policyDirty.current = false;
+        await refresh();
+      }))
+    ),
+    (0, import_react.createElement)("p", null, "\u81EA\u52A8\u8BC4\u8BBA\uFF1A\u5173\u95ED\uFF1B\u81EA\u52A8\u56DE\u590D\uFF1A\u5173\u95ED\u3002\u8BC4\u8BBA\u8349\u7A3F\u6700\u591A150\u5B57\uFF0C\u56DE\u590D\u6700\u591A100\u5B57\u3002\u540C\u4E00\u4EBA\u540C\u4E00\u7EBF\u7A0B\u53EA\u5904\u7406\u4E00\u6B21\uFF1B\u53EA\u63A5\u53D7\u76F4\u63A5\u56DE\u590D\u81EA\u5DF1\u8BC4\u8BBA\u7684\u7B80\u77ED\u95EE\u9898\u6216\u8F7B\u677E\u4E92\u52A8\uFF0C\u957F\u7BC7\u7D22\u53D6\u3001\u9690\u79C1\u3001\u4E89\u5435\u548C\u8FDE\u7EED\u8FFD\u95EE\u8DF3\u8FC7\u3002\u56DE\u590D\u7B5B\u9009\u5185\u6838\u5DF2\u63A5\u5165\u6D4B\u8BD5\uFF0C\u771F\u5B9E\u56DE\u590D\u8F6E\u8BE2\u5C1A\u672A\u5F00\u653E\u3002"),
+    status?.browseUsage ? (0, import_react.createElement)("p", { role: "status" }, `${status.browseUsage.day}\uFF08\u5317\u4EAC\u65F6\u95F4\uFF09\u5DF2\u7CBE\u9009 ${status.browseUsage.picked} / ${status.browseSettings?.policy.perDay ?? 5}\uFF1B\u9884\u89C8\u6A21\u5757\u6A21\u578B\u8BF7\u6C42\uFF1A\u4ECA\u65E5 ${status.browseUsage.todayRequests}\uFF0C\u7D2F\u8BA1 ${status.browseUsage.requests}\u3002\u6B64\u524D\u8BD5\u8DD1\u53CA\u4E00\u6B21\u6027\u8349\u7A3F\u8BF7\u6C42\u5355\u72EC\u4FDD\u7559\u3002`) : null,
+    button("\u7B5B\u9009\u6700\u8FD1\u4E00\u6279\u5E76\u6253\u5370\u8349\u7A3F\uFF081\u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
+      const result = await call("curateBrowse", { runId: status.browseRun.id, accountUid: status.account.uid });
+      setNotice(`\u672C\u6279\u9884\u89C8${result.state === "completed" ? "\u5B8C\u6210" : "\u7ED3\u675F"}\uFF0C\u7ED3\u679C\u663E\u793A\u5728\u4E0B\u65B9\uFF1B\u6CA1\u6709\u53D1\u9001\u3002`);
+    }), !status?.account || status?.browseRun?.state !== "completed" || !status.browseRun.items.some((i) => i.state === "subtitle") || !!status?.busy || policyDirty.current || (status?.browseUsage?.remaining ?? 0) === 0 || latestPreview?.source === status?.browseRun?.id),
+    (0, import_react.createElement)("p", null, "\u6BCF\u6279\u6700\u591A\u4E00\u6B21\u6A21\u578B\u8BF7\u6C42\uFF0C2048\u8F93\u51FAtokens\uFF1B\u5931\u8D25\u4E5F\u8BB0\u6B21\u6570\uFF0C\u4E0D\u81EA\u52A8\u91CD\u8BD5\u3002\u505C\u6B62\u540E\u4E0D\u6062\u590D\uFF0C\u540C\u4E00\u6279\u4E0D\u80FD\u91CD\u590D\u751F\u6210\u3002\u5B57\u5E55\u53EF\u80FD\u53EA\u8986\u76D6\u9996\u4E2A\u5206P\u6216\u7247\u6BB5\uFF0C\u4E0D\u80FD\u5F53\u4F5C\u5B8C\u6574\u89C2\u770B\u3002"),
+    latestPreview ? (0, import_react.createElement)("p", null, `\u6700\u8FD1\u9884\u89C8\uFF1A${latestPreview.state}${latestPreview.reason ? " \xB7 " + latestPreview.reason : ""} \xB7 \u6A21\u578B\u8BF7\u6C42${latestPreview.requested ? "\u5DF2\u9884\u7EA6\u8BA1\u6570" : "\u672A\u53D1\u8D77"}`) : null,
+    ...(curated?.videos ?? []).map((v) => (0, import_react.createElement)(
+      "article",
+      { key: v.bvid, style: { borderTop: "1px solid #71809666", padding: "10px 0" } },
+      (0, import_react.createElement)("a", { href: `https://www.bilibili.com/video/${v.bvid}/`, target: "_blank", rel: "noreferrer" }, v.bvid),
+      (0, import_react.createElement)("p", null, (v.pick ? "\u7CBE\u9009\uFF1A" : "\u8DF3\u8FC7\uFF1A") + v.reason),
+      (0, import_react.createElement)("p", null, "\u5927\u80A5\u9C7C\u7684\u611F\u60F3\uFF1A" + v.thought),
+      (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, v.comment ? "\u8BC4\u8BBA\u8349\u7A3F\uFF08\u672A\u53D1\u9001\uFF09\uFF1A" + v.comment : "\u672C\u6761\u6CA1\u6709\u8BC4\u8BBA\u8349\u7A3F\u3002")
     )),
     (0, import_react.createElement)("h3", null, "\u89C6\u9891\u5185\u5BB9"),
     (0, import_react.createElement)("p", null, status?.diagnostic.decoderAvailable ? "\u753B\u9762\u89E3\u7801\u5668\u53EF\u7528\uFF08FFmpeg / ffprobe\uFF09\u3002" : "\u672A\u68C0\u6D4B\u5230 FFmpeg / ffprobe\uFF1A\u53EF\u6B63\u5E38\u8BFB\u53D6\u5B57\u5E55\uFF0C\u753B\u9762\u5206\u6790\u6682\u4E0D\u53EF\u7528\u3002\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u5B89\u88C5\u5916\u90E8\u7A0B\u5E8F\u3002"),

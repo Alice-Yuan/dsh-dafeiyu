@@ -39,6 +39,9 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private platformValue;
     private browseStoreValue;
     private browseRunnerValue;
+    private activityValue;
+    private curatorValue;
+    private previewController;
     private mediaController;
     private readonly lifetime;
     private serial;
@@ -53,6 +56,8 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private model;
     private runner;
     private browseStore;
+    private activity;
+    private curator;
     private browser;
     private ownerContext;
     private requestedVideo;
@@ -62,6 +67,8 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     status(request: unknown, signal: AbortSignal): Promise<unknown>;
     browse(request: unknown, signal: AbortSignal): Promise<unknown>;
     browseHistory(request: unknown, signal: AbortSignal): Promise<unknown>;
+    saveBrowsePolicy(request: unknown, signal: AbortSignal): Promise<unknown>;
+    curateBrowse(request: unknown, signal: AbortSignal): Promise<unknown>;
     saveConfig(request: unknown, signal: AbortSignal): Promise<unknown>;
     loginStart(request: unknown, signal: AbortSignal): Promise<unknown>;
     loginPoll(request: unknown, signal: AbortSignal): Promise<unknown>;

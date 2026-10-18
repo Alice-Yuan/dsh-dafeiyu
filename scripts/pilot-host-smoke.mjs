@@ -29,8 +29,8 @@ async function probe(config) {
     const persist = await module('dsh-session-persistence-jsonl'); await ctx.plugin(persist, { root: join(config.dir, 'sessions') }).await();
     const { TYPERT } = await import(pathToFileURL(join(config.project, 'dist/host/typert.js')).href);
     const { validateTypertManifest } = await module('dsh-typert-loader'); validateTypertManifest('dsh-dafeiyu', TYPERT); ctx.typert.register(TYPERT);
-    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 20);
-    report.checks.push('installed Typert validator and registry accept all twenty strict endpoints');
+    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 22);
+    report.checks.push('installed Typert validator and registry accept all twenty-two strict endpoints');
     await ctx.plugin((await module('dsh-attachment-local')).default, { dshHome: join(config.dir, 'attachment-home') }).await();
     const { HostModel } = await import(pathToFileURL(join(config.project, 'dist/host/model.js')).href);
     const { PilotStore } = await import(pathToFileURL(join(config.project, 'dist/pilot/store.js')).href);
@@ -154,6 +154,25 @@ async function probe(config) {
     assert.equal(reviewStore.budget().lifetimeUsed, browseBudget); assert.equal(captures.length, browseCaptures);
     assert.equal(control.currentConfig().bvid, pilotConfig.bvid); assert.equal(control.model().selection().model, 'pinned-synthetic');
     // A fresh batch can be cancelled while its read is pending. No late result is committed.
+    const activity = control.activity(), savedPolicy = activity.settings();
+    const previewRequest = { runId: browsed.id, accountUid: '30001' };
+    const invokePreview = request => ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'curateBrowse', args: { request }, peer });
+    await assert.rejects(control.curateBrowse(previewRequest, new AbortController().signal), /OWNER_REQUIRED/);
+    await assert.rejects(invokePreview({ ...previewRequest, reserve: true }));
+    await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'saveBrowsePolicy', args: { request: { ...savedPolicy, policy: { ...savedPolicy.policy, perDay: 2 } } }, peer });
+    assert.equal(captures.length, browseCaptures);
+    responseText = JSON.stringify({ videos: [{ bvid: candidate.bvid, pick: true, reason: 'Useful specific example', thought: 'Small experiment', comment: 'Worth a small experiment.' }] });
+    const curated = await invokePreview(previewRequest);
+    assert.equal(curated.state, 'completed'); assert.equal(activity.usage('30001', Date.now()).picked, 1);
+    assert.equal(activity.usage('30001', Date.now()).requests, 1);
+    assert.equal(reviewStore.budget().lifetimeUsed, browseBudget); assert.equal(reviewStore.actions().length, 0);
+    assert.equal(captures.length, browseCaptures + 1); assert.equal(captures.at(-1).maxTokens, 2048);
+    assert.equal(captures.at(-1).model, 'pinned-synthetic'); assert.equal(captures.at(-1).tools?.length ?? 0, 0);
+    for (const secret of ['GLOBAL_PRIVATE_CANARY', 'HOST_REQUIRED_DIRECTORY_CANARY', 'ACTUAL_PRESET_CHAT']) assert.ok(!JSON.stringify(captures.at(-1)).includes(secret));
+    assert.ok(JSON.stringify(captures.at(-1)).includes('UNTRUSTED_SUBTITLE_REQUESTING_SEND'));
+    await assert.rejects(invokePreview(previewRequest), /BROWSE_NO_NEW_SUBTITLES/);
+    assert.equal(captures.length, browseCaptures + 1); responseText = 'Synthetic response';
+    report.checks.push('authenticated curation preview persists policy and one pick, uses pinned isolated public agent with zero tools and 2048 output tokens; old trial budget unchanged; replay denied');
     control.browseStore().save({ ...browsed, startedAt: Date.now() - 120000 });
     // Update the synthetic SQL timestamp as well, to simulate elapsed cooldown without waiting.
     reviewStore.db.prepare('UPDATE browse_runs SET at=? WHERE id=?').run(Date.now() - 120000, browsed.id);

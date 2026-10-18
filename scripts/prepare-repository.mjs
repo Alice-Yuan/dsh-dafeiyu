@@ -4,7 +4,7 @@ import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 const root = resolve(import.meta.dirname, '..');
 const output = join(root, 'tmp', 'repository-export');
-const files = ['.gitignore', 'README.md', 'package.json', 'package-lock.json',
+const files = ['.gitignore', 'README.md', 'THIRD_PARTY_NOTICES.md', 'package.json', 'package-lock.json',
   'tsconfig.json', 'tsconfig.client.json', 'cordis.patch.yml', 'docs/desktop-install.md',
   'scripts/build-client.mjs', 'scripts/render-preview.mjs', 'scripts/check-desktop-bundle.mjs',
   'scripts/desktop-core-smoke.mjs', 'scripts/bundle-install-guard.mjs', 'scripts/pilot-host-smoke.mjs',

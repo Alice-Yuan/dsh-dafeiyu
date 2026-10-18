@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info';
+import { browsePolicySchema } from '../browse/policy.js';
 const configSchema = z.object({ ownerUid: z.string().max(25), bvid: z.string().max(12), persona: z.string().max(2000), diagnosticMarker: z.string().max(80) }).strict();
 export const REQUESTS = {
     status: z.object({}).strict(),
@@ -10,6 +11,8 @@ export const REQUESTS = {
     preflight: z.object({}).strict(),
     browse: z.object({ keyword: z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
     browseHistory: z.object({}).strict(),
+    saveBrowsePolicy: z.object({ policy: browsePolicySchema, revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+    curateBrowse: z.object({ runId: z.string().uuid(), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
     checkOwnerRequest: z.object({}).strict(),
     models: z.object({}).strict(),
     saveModel: z.object({ provider: z.string().min(1).max(200), model: z.string().min(1).max(300) }).strict(),

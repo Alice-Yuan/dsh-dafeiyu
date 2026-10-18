@@ -1,4 +1,12 @@
 import { PilotError, type Account, type VideoMaterial } from '../pilot/contracts.js';
+import type { BrowsePolicy } from './policy.js';
+
+export interface PreviewRound {
+  id: string; source: string; account: string; day: string; at: number;
+  kind: 'curation' | 'replies'; state: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  requested: boolean; capacity: number; policy: BrowsePolicy; result: unknown; reason: string;
+}
+export interface CurationResult { videos: { bvid: string; pick: boolean; reason: string; thought: string; comment: string }[] }
 
 export const BROWSE_LIMITS = Object.freeze({ pages: 2, pageSize: 20, videos: 3, durationMs: 120_000, cooldownMs: 60_000, history: 200, runs: 20 });
 export function keywordOf(value: unknown): string {

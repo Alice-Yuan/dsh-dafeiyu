@@ -15,6 +15,8 @@ import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
 import { isOwnerVideoRequest } from '../pilot/owner-request.js';
 import { BrowseRunner } from '../browse/runner.js';
 import { BrowseStore } from '../browse/store.js';
+import { ActivityStore } from '../browse/activity-store.js';
+import { Curator } from '../browse/curation.js';
 
 interface Ref<T> { get(): T }
 type LiveConfig = { [K in keyof PilotConfig]: Ref<PilotConfig[K]> };
@@ -37,6 +39,9 @@ export class DaFeiYuControl extends TypertRemoteService {
   private platformValue: Bilibili | null = null;
   private browseStoreValue: BrowseStore | null = null;
   private browseRunnerValue: BrowseRunner | null = null;
+  private activityValue: ActivityStore | null = null;
+  private curatorValue: Curator | null = null;
+  private previewController: AbortController | null = null;
   private mediaController: AbortController | null = null;
   private readonly lifetime = new AbortController();
   private serial: Promise<unknown> = Promise.resolve();
@@ -62,6 +67,8 @@ export class DaFeiYuControl extends TypertRemoteService {
   private model(): HostModel { return this.modelValue ??= new HostModel(this.owner as unknown as ModelHost, () => this.store(), () => this.currentConfig()); }
   private runner(): PilotRunner { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
   private browseStore(): BrowseStore { return this.browseStoreValue ??= new BrowseStore(this.store()); }
+  private activity(): ActivityStore { return this.activityValue ??= new ActivityStore(this.store()); }
+  private curator(): Curator { return this.curatorValue ??= new Curator(this.browseStore(), this.activity(), (prompt, signal, reserve) => this.model().preview(prompt, signal, reserve)); }
   private browser(): BrowseRunner {
     return this.browseRunnerValue ??= new BrowseRunner(this.browseStore(), {
       account: signal => this.platform().account(signal),
@@ -111,6 +118,7 @@ export class DaFeiYuControl extends TypertRemoteService {
     const lifetime = AbortSignal.any([signal, this.lifetime.signal]);
     const run = async () => { lifetime.throwIfAborted(); try {
       if (this.browseRunnerValue?.busy && !['status', 'stop', 'browseHistory'].includes(method)) throw new PilotError('RUN_BUSY');
+      if (this.previewController && !['status', 'stop', 'browseHistory'].includes(method)) throw new PilotError('RUN_BUSY');
       if (exclusive) this.exclusiveActive = true;
       return await action(parsed.data, lifetime);
     } catch (error) { throw new RemoteError('gateway/bad-request', safeError(error), {}); }
@@ -131,12 +139,13 @@ export class DaFeiYuControl extends TypertRemoteService {
       }
       return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
         configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-        busy: !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+        busy: !!this.previewController || !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
         browseBusy: this.browseRunnerValue?.busy ?? false, browseRun: this.browseStore().latest(),
+        browseSettings: this.activity().settings(), browseUsage: this.activity().usage(account?.uid ?? '', Date.now()),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
         videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
         ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
-        diagnostic: { version: '0.1.0-alpha.10', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
+        diagnostic: { version: '0.1.0-alpha.11', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
     }, false);
   }
   @Remote
@@ -151,6 +160,28 @@ export class DaFeiYuControl extends TypertRemoteService {
   @Remote
   browseHistory(request: unknown, signal: AbortSignal): Promise<unknown> {
     return this.call('browseHistory', request, signal, async () => this.browseStore().history(), false);
+  }
+  @Remote
+  saveBrowsePolicy(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('saveBrowsePolicy', request, signal, async value => {
+      if (this.mediaController || this.runnerValue?.busy || this.modelValue?.busy) throw new PilotError('RUN_BUSY');
+      this.store().assertOwner(this.currentConfig().ownerUid);
+      this.activity().savePolicy(value.policy, value.revision); return this.activity().settings();
+    });
+  }
+  @Remote
+  curateBrowse(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('curateBrowse', request, signal, async (value, lifetime) => {
+      if (this.exclusiveActive || this.mediaController || this.runnerValue?.busy || this.modelValue?.busy) throw new PilotError('RUN_BUSY');
+      const controller = new AbortController(); this.previewController = controller;
+      const linked = AbortSignal.any([lifetime, controller.signal, AbortSignal.timeout(120_000)]);
+      try {
+        const config = configOf(this.currentConfig(), true); this.store().bindOwner(config.ownerUid);
+        const account = await this.platform().account(linked); linked.throwIfAborted();
+        if (account.uid !== value.accountUid || account.uid === config.ownerUid) throw new PilotError('ACCOUNT_CHANGED');
+        return await this.curator().preview(value.runId, account.uid, linked);
+      } finally { this.previewController = null; }
+    }, false);
   }
   @Remote
   saveConfig(request: unknown, signal: AbortSignal): Promise<unknown> {
@@ -308,7 +339,7 @@ export class DaFeiYuControl extends TypertRemoteService {
   }
   @Remote
   stop(request: unknown, signal: AbortSignal): Promise<unknown> {
-    return this.call('stop', request, signal, async () => { this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
+    return this.call('stop', request, signal, async () => { this.previewController?.abort(); this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
   }
   @Remote
   reconcile(request: unknown, signal: AbortSignal): Promise<unknown> {

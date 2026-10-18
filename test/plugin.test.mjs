@@ -10,14 +10,14 @@ import { Context } from '@deepseek-ai/cordis';
 const require = createRequire(import.meta.url);
 test('V-M1-PACKAGE: lazy client registration, scoped settings and cleanup contract', async () => {
   const code = await readFile(new URL('../dist/client.js', import.meta.url), 'utf8');
-  const rows = []; let requires = 0;
+  const rows = []; let requires = 0; const dependencies = new Set();
   runInNewContext(code, { window: { __ModuleLoader__: { load: row => rows.push(row) } } });
   assert.equal(rows.length, 1); assert.equal(rows[0].id, 'dsh-dafeiyu');
   assert.equal(requires, 0);
   const client = rows[0].factory(name => {
-    requires++; assert.ok(['react', 'zod'].includes(name)); return require(name);
+    requires++; dependencies.add(name); assert.ok(['react', 'zod'].includes(name)); return require(name);
   });
-  assert.equal(requires, 2);
+  assert.deepEqual([...dependencies].sort(), ['react', 'zod']);
   const effects = []; const registered = [];
   const fakeContext = { remote: { async $mount(value) { assert.equal(value.package, 'dsh-dafeiyu'); return async () => {}; }, dafeyu: {} },
     inject(names, apply) { assert.deepEqual(Array.from(names), ['slots', 'remote.dafeyu']); apply(this); return { dispose: async () => { effects.forEach(dispose => dispose()); } }; }, slots: {

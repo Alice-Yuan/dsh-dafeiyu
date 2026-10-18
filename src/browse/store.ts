@@ -15,6 +15,14 @@ export class BrowseStore {
     const row = this.pilot.db.prepare('SELECT body FROM browse_runs ORDER BY at DESC,rowid DESC LIMIT 1').get();
     return row ? JSON.parse(String(row.body)) as BrowseRun : null;
   }
+  run(id: string): BrowseRun | null {
+    const row = this.pilot.db.prepare('SELECT body FROM browse_runs WHERE id=?').get(id);
+    return row ? JSON.parse(String(row.body)) as BrowseRun : null;
+  }
+  reading(account: string, bvid: string): Reading | null {
+    const row = this.pilot.db.prepare('SELECT body FROM browse_readings WHERE account=? AND bvid=?').get(account, bvid);
+    return row ? JSON.parse(String(row.body)) as Reading : null;
+  }
   save(run: BrowseRun): void {
     this.pilot.transaction(() => {
       this.pilot.db.prepare('INSERT INTO browse_runs VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(run.id, run.startedAt, JSON.stringify(run));

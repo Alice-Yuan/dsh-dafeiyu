@@ -24,7 +24,7 @@ export interface ModelHost {
   agentDefaultModel: { currentSelection(): { provider: string; model: string; reasoningEffort?: string } };
   on(name: string, fn: (...args: any[]) => unknown): () => void;
 }
-interface Job { purpose: Purpose; rpcId: string; turn: number | null; text: string | null; calibrationRevision?: string | undefined; visionRoute?: { provider: string; model: string } | undefined; resolve(value: string): void; reject(error: Error): void }
+interface Job { purpose: Purpose; rpcId: string; turn: number | null; text: string | null; reservePreview?: (() => void) | undefined; calibrationRevision?: string | undefined; visionRoute?: { provider: string; model: string } | undefined; resolve(value: string): void; reject(error: Error): void }
 export class HostModel implements PilotModel {
   private jobs = new Map<string, Job>();
   private handles = new Map<string, AgentHandle>();
@@ -96,7 +96,8 @@ export class HostModel implements PilotModel {
         if (info.reasoning?.efforts.some(e => e.id === 'low')) reasoningEffort = 'low';
       }
       // Every actual loop attempt, including retries, consumes a durable reservation.
-      this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
+      if (job?.reservePreview) job.reservePreview();
+      else this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
       return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
     });
     // This preset has no retry plugin. Refuse any retry requested by a global plugin.
@@ -107,7 +108,14 @@ export class HostModel implements PilotModel {
     const operation = this.perform(request, signal); this.pending.add(operation);
     try { return await operation; } finally { this.pending.delete(operation); }
   }
-  private async perform(request: ModelRequest, signal: AbortSignal): Promise<{ text: string; sessionId: string }> {
+  async preview(prompt: string, signal: AbortSignal, reserve: () => void): Promise<{ text: string; sessionId: string }> {
+    if (this.disposed) throw new PilotError('HOST_DISPOSED');
+    // Internal capability: JSON/RPC and native chat cannot provide this callback.
+    const operation = this.perform({ purpose: 'public', persona: this.config().persona, prompt }, signal, reserve);
+    this.pending.add(operation);
+    try { return await operation; } finally { this.pending.delete(operation); }
+  }
+  private async perform(request: ModelRequest, signal: AbortSignal, reservePreview?: () => void): Promise<{ text: string; sessionId: string }> {
     signal.throwIfAborted(); this.store.bindOwner(this.config().ownerUid);
     const content: unknown[] = [{ type: 'text', text: request.prompt }];
     let visionRoute: { provider: string; model: string } | undefined;
@@ -128,7 +136,7 @@ export class HostModel implements PilotModel {
     let rejectJob!: (error: Error) => void;
     const result = new Promise<string>((resolve, reject) => {
       rejectJob = reject;
-      this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
+      this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, reservePreview, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
     });
     const abort = () => { agent.cancel({ kind: 'user' }, { keepInbox: false }); rejectJob(new PilotError('MODEL_CANCELLED')); };
     lifetime.addEventListener('abort', abort, { once: true });

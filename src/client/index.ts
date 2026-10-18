@@ -2,8 +2,14 @@ import { createElement as h, useEffect, useRef, useState, type ReactElement } fr
 import { REMOTE, type Method } from '../shared/remote.js';
 import { DEFAULT_CONFIG, type PilotConfig } from '../pilot/contracts.js';
 import type { BrowseRun, Reading } from '../browse/contracts.js';
+import { DEFAULT_BROWSE_POLICY, type BrowsePolicy } from '../browse/policy.js';
+import type { PreviewRound, CurationResult } from '../browse/contracts.js';
 
 export const name = 'dafeyu-settings';
+interface Snapshot {
+  browseSettings?: { policy: BrowsePolicy; revision: string };
+  browseUsage?: { day: string; picked: number; remaining: number; requests: number; todayRequests: number; latest: PreviewRound | null };
+}
 export const inject = ['slots', 'remote'];
 interface Subject { kind: string; id?: string; pkg?: { name?: string } }
 interface DetailProps { subject?: Subject }
@@ -31,6 +37,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [modelKey, setModelKey] = useState('');
   const [keyword, setKeyword] = useState(''); const [readings, setReadings] = useState<Reading[]>([]);
   const [browsing, setBrowsing] = useState(false);
+  const [browsePolicy, setBrowsePolicy] = useState<BrowsePolicy>({ ...DEFAULT_BROWSE_POLICY });
+  const [policyRevision, setPolicyRevision] = useState(''); const policyDirty = useRef(false);
   const mounted = useRef(true);
   const call = async (method: Method, request: unknown = {}, signal?: AbortSignal): Promise<any> => {
     if (!ctx) throw new Error('尚未连接 Desktop 宿主');
@@ -41,6 +49,7 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     const next = await call('status', {}, signal) as Snapshot;
     if (!mounted.current) return;
     setStatus(next);
+    if (!policyDirty.current && next.browseSettings) { setBrowsePolicy(next.browseSettings.policy); setPolicyRevision(next.browseSettings.revision); }
     if (!dirty.current) { setDraft(next.config); setRevision(next.revision); }
   };
   useEffect(() => {
@@ -76,6 +85,10 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     h(key === 'persona' ? 'textarea' : 'input', { value: draft[key], onChange: (e: { target: { value: string } }) => edit(key, e.target.value), style: { display: 'block', width: '100%', padding: 8, boxSizing: 'border-box' } }));
   const visible = (value: boolean | null) => value === true ? '已观察到' : '未确认';
   const readState = (value: string) => ({ subtitle: '已取得字幕，尚未由模型判断', 'no-subtitle': '无字幕，跳过', seen: '近期已读，跳过', deferred: '达到本批读取上限', failed: '读取失败' }[value] ?? value);
+  const latestPreview = status?.browseUsage?.latest;
+  const curated = latestPreview?.state === 'completed' && latestPreview.kind === 'curation' ? latestPreview.result as CurationResult | null : null;
+  const limitField = (label: string, key: 'perDay' | 'commentPerRound' | 'replyPerRound', min: number, max: number) => h('label', { style: { display: 'block', margin: '8px 0' } }, label + ' ',
+    h('input', { type: 'number', min, max, value: browsePolicy[key], onChange: (e: { target: { value: string } }) => { policyDirty.current = true; setBrowsePolicy(p => ({ ...p, [key]: Number(e.target.value) })); } }));
   let videoText = '', reviewLabel = '待复核', reviewed = false;
   if (status?.videoReview) { try { const r = JSON.parse(status.videoReview); if (r.revision === status.videoInspectionRevision) { reviewed = r.decision === 'approved'; reviewLabel = reviewed ? '已复核通过' : '已驳回：' + r.note; } } catch { /* Treat malformed state as unreviewed. */ } }
   if (status?.videoInspection) { try { const v = JSON.parse(status.videoInspection); videoText = [v.analysis.summary, ...v.analysis.observations.map((o: { atSeconds: number; description: string }) => `${o.atSeconds.toFixed(1)} 秒：${o.description}`), '理解范围：画面采样，音频未转写。', ...v.analysis.limitations].join('\n'); } catch { videoText = '内容理解记录无法读取，请查看诊断。'; } }
@@ -122,6 +135,26 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
       h('p', null, `UP主：${item.author} · ${new Date(item.at).toLocaleString()}${item.truncated ? ' · 字幕达到保留上限，可能截断' : ''}`),
       h('a', { href: `https://www.bilibili.com/video/${item.bvid}/`, target: '_blank', rel: 'noreferrer' }, '打开来源视频'),
       h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 300, overflow: 'auto' } }, item.subtitle ?? '没有字幕，未下载媒体或推测视频内容。'))),
+    h('h3', null, '精选与草稿 · 仅预览'),
+    h('p', null, '沿用参考项目的取舍：值得占用一次注意力才精选，可以全部跳过。每日额度按北京时间统计精选视频，浏览和模型请求另计。'),
+    h('fieldset', { disabled: disabled || !!status?.busy }, h('legend', null, '浏览额度与回复规则'),
+      limitField('每天最多精选（0表示暂停精选）', 'perDay', 0, 50),
+      limitField('每轮最多评论草稿（0表示不生成）', 'commentPerRound', 0, 20),
+      limitField('每轮最多回复草稿', 'replyPerRound', 1, 10),
+      button('保存浏览限额', () => act(async () => { await call('saveBrowsePolicy', { policy: browsePolicy, revision: policyRevision }); policyDirty.current = false; setNotice('浏览限额已保存，已有消耗保留；未调用模型或开启发送。'); }), !policyRevision),
+      button('重新读取浏览限额', () => act(async () => { policyDirty.current = false; await refresh(); }))),
+    h('p', null, '自动评论：关闭；自动回复：关闭。评论草稿最多150字，回复最多100字。同一人同一线程只处理一次；只接受直接回复自己评论的简短问题或轻松互动，长篇索取、隐私、争吵和连续追问跳过。回复筛选内核已接入测试，真实回复轮询尚未开放。'),
+    status?.browseUsage ? h('p', { role: 'status' }, `${status.browseUsage.day}（北京时间）已精选 ${status.browseUsage.picked} / ${status.browseSettings?.policy.perDay ?? 5}；预览模块模型请求：今日 ${status.browseUsage.todayRequests}，累计 ${status.browseUsage.requests}。此前试跑及一次性草稿请求单独保留。`) : null,
+    button('筛选最近一批并打印草稿（1次模型请求）', () => act(async () => {
+      const result = await call('curateBrowse', { runId: status!.browseRun!.id, accountUid: status!.account!.uid });
+      setNotice(`本批预览${result.state === 'completed' ? '完成' : '结束'}，结果显示在下方；没有发送。`);
+    }), !status?.account || status?.browseRun?.state !== 'completed' || !status.browseRun.items.some(i => i.state === 'subtitle') || !!status?.busy || policyDirty.current || (status?.browseUsage?.remaining ?? 0) === 0 || latestPreview?.source === status?.browseRun?.id),
+    h('p', null, '每批最多一次模型请求，2048输出tokens；失败也记次数，不自动重试。停止后不恢复，同一批不能重复生成。字幕可能只覆盖首个分P或片段，不能当作完整观看。'),
+    latestPreview ? h('p', null, `最近预览：${latestPreview.state}${latestPreview.reason ? ' · ' + latestPreview.reason : ''} · 模型请求${latestPreview.requested ? '已预约计数' : '未发起'}`) : null,
+    ...(curated?.videos ?? []).map(v => h('article', { key: v.bvid, style: { borderTop: '1px solid #71809666', padding: '10px 0' } },
+      h('a', { href: `https://www.bilibili.com/video/${v.bvid}/`, target: '_blank', rel: 'noreferrer' }, v.bvid),
+      h('p', null, (v.pick ? '精选：' : '跳过：') + v.reason), h('p', null, '大肥鱼的感想：' + v.thought),
+      h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, v.comment ? '评论草稿（未发送）：' + v.comment : '本条没有评论草稿。'))),
     h('h3', null, '视频内容'),
     h('p', null, status?.diagnostic.decoderAvailable ? '画面解码器可用（FFmpeg / ffprobe）。' : '未检测到 FFmpeg / ffprobe：可正常读取字幕，画面分析暂不可用。插件不会自动安装外部程序。'),
     h('p', null, '原视频临时文件处理后删除；预览不另存图片。交给模型的图像由 DSH 保存为会话附件，当前没有自动清理策略。一次只读校准最多提交3帧。'),

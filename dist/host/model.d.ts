@@ -133,6 +133,10 @@ export declare class HostModel implements PilotModel {
         text: string;
         sessionId: string;
     }>;
+    preview(prompt: string, signal: AbortSignal, reserve: () => void): Promise<{
+        text: string;
+        sessionId: string;
+    }>;
     private perform;
     private requireVision;
     private session;

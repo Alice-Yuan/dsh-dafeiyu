@@ -48,6 +48,8 @@ import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
 import { isOwnerVideoRequest } from '../pilot/owner-request.js';
 import { BrowseRunner } from '../browse/runner.js';
 import { BrowseStore } from '../browse/store.js';
+import { ActivityStore } from '../browse/activity-store.js';
+import { Curator } from '../browse/curation.js';
 export const name = 'dafeyu';
 export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert', 'llm', 'attachments'];
 export const Config = s.object({
@@ -62,6 +64,8 @@ let DaFeiYuControl = (() => {
     let _status_decorators;
     let _browse_decorators;
     let _browseHistory_decorators;
+    let _saveBrowsePolicy_decorators;
+    let _curateBrowse_decorators;
     let _saveConfig_decorators;
     let _loginStart_decorators;
     let _loginPoll_decorators;
@@ -85,6 +89,8 @@ let DaFeiYuControl = (() => {
             _status_decorators = [Remote];
             _browse_decorators = [Remote];
             _browseHistory_decorators = [Remote];
+            _saveBrowsePolicy_decorators = [Remote];
+            _curateBrowse_decorators = [Remote];
             _saveConfig_decorators = [Remote];
             _loginStart_decorators = [Remote];
             _loginPoll_decorators = [Remote];
@@ -105,6 +111,8 @@ let DaFeiYuControl = (() => {
             __esDecorate(this, null, _status_decorators, { kind: "method", name: "status", static: false, private: false, access: { has: obj => "status" in obj, get: obj => obj.status }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _browse_decorators, { kind: "method", name: "browse", static: false, private: false, access: { has: obj => "browse" in obj, get: obj => obj.browse }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _browseHistory_decorators, { kind: "method", name: "browseHistory", static: false, private: false, access: { has: obj => "browseHistory" in obj, get: obj => obj.browseHistory }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _saveBrowsePolicy_decorators, { kind: "method", name: "saveBrowsePolicy", static: false, private: false, access: { has: obj => "saveBrowsePolicy" in obj, get: obj => obj.saveBrowsePolicy }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _curateBrowse_decorators, { kind: "method", name: "curateBrowse", static: false, private: false, access: { has: obj => "curateBrowse" in obj, get: obj => obj.curateBrowse }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _saveConfig_decorators, { kind: "method", name: "saveConfig", static: false, private: false, access: { has: obj => "saveConfig" in obj, get: obj => obj.saveConfig }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _loginStart_decorators, { kind: "method", name: "loginStart", static: false, private: false, access: { has: obj => "loginStart" in obj, get: obj => obj.loginStart }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _loginPoll_decorators, { kind: "method", name: "loginPoll", static: false, private: false, access: { has: obj => "loginPoll" in obj, get: obj => obj.loginPoll }, metadata: _metadata }, null, _instanceExtraInitializers);
@@ -132,6 +140,9 @@ let DaFeiYuControl = (() => {
         platformValue = null;
         browseStoreValue = null;
         browseRunnerValue = null;
+        activityValue = null;
+        curatorValue = null;
+        previewController = null;
         mediaController = null;
         lifetime = new AbortController();
         serial = Promise.resolve();
@@ -159,6 +170,8 @@ let DaFeiYuControl = (() => {
         model() { return this.modelValue ??= new HostModel(this.owner, () => this.store(), () => this.currentConfig()); }
         runner() { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
         browseStore() { return this.browseStoreValue ??= new BrowseStore(this.store()); }
+        activity() { return this.activityValue ??= new ActivityStore(this.store()); }
+        curator() { return this.curatorValue ??= new Curator(this.browseStore(), this.activity(), (prompt, signal, reserve) => this.model().preview(prompt, signal, reserve)); }
         browser() {
             return this.browseRunnerValue ??= new BrowseRunner(this.browseStore(), {
                 account: signal => this.platform().account(signal),
@@ -224,6 +237,8 @@ let DaFeiYuControl = (() => {
                 try {
                     if (this.browseRunnerValue?.busy && !['status', 'stop', 'browseHistory'].includes(method))
                         throw new PilotError('RUN_BUSY');
+                    if (this.previewController && !['status', 'stop', 'browseHistory'].includes(method))
+                        throw new PilotError('RUN_BUSY');
                     if (exclusive)
                         this.exclusiveActive = true;
                     return await action(parsed.data, lifetime);
@@ -277,12 +292,13 @@ let DaFeiYuControl = (() => {
                 }
                 return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
                     configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-                    busy: !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+                    busy: !!this.previewController || !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
                     browseBusy: this.browseRunnerValue?.busy ?? false, browseRun: this.browseStore().latest(),
+                    browseSettings: this.activity().settings(), browseUsage: this.activity().usage(account?.uid ?? '', Date.now()),
                     privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
                     videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
                     ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
-                    diagnostic: { version: '0.1.0-alpha.10', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
+                    diagnostic: { version: '0.1.0-alpha.11', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
             }, false);
         }
         browse(request, signal) {
@@ -297,6 +313,36 @@ let DaFeiYuControl = (() => {
         }
         browseHistory(request, signal) {
             return this.call('browseHistory', request, signal, async () => this.browseStore().history(), false);
+        }
+        saveBrowsePolicy(request, signal) {
+            return this.call('saveBrowsePolicy', request, signal, async (value) => {
+                if (this.mediaController || this.runnerValue?.busy || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                this.store().assertOwner(this.currentConfig().ownerUid);
+                this.activity().savePolicy(value.policy, value.revision);
+                return this.activity().settings();
+            });
+        }
+        curateBrowse(request, signal) {
+            return this.call('curateBrowse', request, signal, async (value, lifetime) => {
+                if (this.exclusiveActive || this.mediaController || this.runnerValue?.busy || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                const controller = new AbortController();
+                this.previewController = controller;
+                const linked = AbortSignal.any([lifetime, controller.signal, AbortSignal.timeout(120_000)]);
+                try {
+                    const config = configOf(this.currentConfig(), true);
+                    this.store().bindOwner(config.ownerUid);
+                    const account = await this.platform().account(linked);
+                    linked.throwIfAborted();
+                    if (account.uid !== value.accountUid || account.uid === config.ownerUid)
+                        throw new PilotError('ACCOUNT_CHANGED');
+                    return await this.curator().preview(value.runId, account.uid, linked);
+                }
+                finally {
+                    this.previewController = null;
+                }
+            }, false);
         }
         saveConfig(request, signal) {
             return this.call('saveConfig', request, signal, async (value) => {
@@ -484,7 +530,7 @@ let DaFeiYuControl = (() => {
             });
         }
         stop(request, signal) {
-            return this.call('stop', request, signal, async () => { this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
+            return this.call('stop', request, signal, async () => { this.previewController?.abort(); this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
         }
         reconcile(request, signal) {
             return this.call('reconcile', request, signal, async (_value, lifetime) => { if (this.runnerValue?.busy)

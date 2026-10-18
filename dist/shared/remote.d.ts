@@ -21,6 +21,20 @@ export declare const REQUESTS: {
         accountUid: z.ZodString;
     }, z.core.$strict>;
     readonly browseHistory: z.ZodObject<{}, z.core.$strict>;
+    readonly saveBrowsePolicy: z.ZodObject<{
+        policy: z.ZodObject<{
+            perDay: z.ZodNumber;
+            commentPerRound: z.ZodNumber;
+            replyPerRound: z.ZodNumber;
+            autoComment: z.ZodLiteral<false>;
+            replyToComments: z.ZodLiteral<false>;
+        }, z.core.$strict>;
+        revision: z.ZodString;
+    }, z.core.$strict>;
+    readonly curateBrowse: z.ZodObject<{
+        runId: z.ZodString;
+        accountUid: z.ZodString;
+    }, z.core.$strict>;
     readonly checkOwnerRequest: z.ZodObject<{}, z.core.$strict>;
     readonly models: z.ZodObject<{}, z.core.$strict>;
     readonly saveModel: z.ZodObject<{

@@ -100,7 +100,10 @@ export class HostModel {
                     reasoningEffort = 'low';
             }
             // Every actual loop attempt, including retries, consumes a durable reservation.
-            this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
+            if (job?.reservePreview)
+                job.reservePreview();
+            else
+                this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
             return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
         });
         // This preset has no retry plugin. Refuse any retry requested by a global plugin.
@@ -118,7 +121,20 @@ export class HostModel {
             this.pending.delete(operation);
         }
     }
-    async perform(request, signal) {
+    async preview(prompt, signal, reserve) {
+        if (this.disposed)
+            throw new PilotError('HOST_DISPOSED');
+        // Internal capability: JSON/RPC and native chat cannot provide this callback.
+        const operation = this.perform({ purpose: 'public', persona: this.config().persona, prompt }, signal, reserve);
+        this.pending.add(operation);
+        try {
+            return await operation;
+        }
+        finally {
+            this.pending.delete(operation);
+        }
+    }
+    async perform(request, signal, reservePreview) {
         signal.throwIfAborted();
         this.store.bindOwner(this.config().ownerUid);
         const content = [{ type: 'text', text: request.prompt }];
@@ -146,7 +162,7 @@ export class HostModel {
         let rejectJob;
         const result = new Promise((resolve, reject) => {
             rejectJob = reject;
-            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
+            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, reservePreview, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
         });
         const abort = () => { agent.cancel({ kind: 'user' }, { keepInbox: false }); rejectJob(new PilotError('MODEL_CANCELLED')); };
         lifetime.addEventListener('abort', abort, { once: true });
