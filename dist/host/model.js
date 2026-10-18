@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { LIMITS, PilotError } from '../pilot/contracts.js';
+import { MEDIA_LIMITS } from '../platform/media.js';
 export class HostModel {
     host;
     getStore;
@@ -75,6 +76,11 @@ export class HostModel {
             const selection = this.host.agentDefaultModel.currentSelection();
             if (!selection.provider || !selection.model)
                 throw new PilotError('DEFAULT_MODEL_MISSING');
+            if (job?.visionRoute) {
+                if (selection.provider !== job.visionRoute.provider || selection.model !== job.visionRoute.model)
+                    throw new PilotError('MODEL_CHANGED_DURING_MEDIA');
+                await this.requireVision(selection, event.signal);
+            }
             // Every actual loop attempt, including retries, consumes a durable reservation.
             this.store.reserveRequest(purpose, Date.now());
             return { ...selection, maxTokens: LIMITS.outputTokens };
@@ -97,6 +103,21 @@ export class HostModel {
     async perform(request, signal) {
         signal.throwIfAborted();
         this.store.bindOwner(this.config().ownerUid);
+        const content = [{ type: 'text', text: request.prompt }];
+        let visionRoute;
+        if (request.frames?.length) {
+            if (request.purpose !== 'public' || request.frames.length > MEDIA_LIMITS.frames || request.frames.some(f => !Number.isFinite(f.atSeconds) || f.atSeconds < 0 || f.jpeg.byteLength > MEDIA_LIMITS.frameBytes))
+                throw new PilotError('MODEL_MEDIA_DENIED');
+            visionRoute = this.host.agentDefaultModel.currentSelection();
+            await this.requireVision(visionRoute, signal);
+            signal.throwIfAborted();
+            const refs = await this.host.attachments.saveImages(request.frames.map((f, i) => ({ data: f.jpeg, mediaType: 'image/jpeg', name: `video-frame-${i + 1}-${f.atSeconds.toFixed(3)}s.jpg` })));
+            signal.throwIfAborted();
+            if (refs.length !== request.frames.length)
+                throw new PilotError('MODEL_MEDIA_DENIED');
+            for (const [i, attachment] of refs.entries())
+                content.push({ type: 'text', text: `视频采样帧 ${i + 1}，时间 ${request.frames[i].atSeconds.toFixed(3)} 秒` }, { type: 'image', attachment });
+        }
         const privateChat = request.purpose !== 'public';
         const handle = await this.session(privateChat, signal);
         const agent = handle.agent, sessionId = agent.id;
@@ -107,13 +128,13 @@ export class HostModel {
         let rejectJob;
         const result = new Promise((resolve, reject) => {
             rejectJob = reject;
-            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, resolve, reject });
+            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, visionRoute, resolve, reject });
         });
         const abort = () => { agent.cancel({ kind: 'user' }, { keepInbox: false }); rejectJob(new PilotError('MODEL_CANCELLED')); };
         lifetime.addEventListener('abort', abort, { once: true });
         try {
             lifetime.throwIfAborted();
-            agent.followup({ id: randomUUID(), role: 'user', content: [{ type: 'text', text: request.prompt }], source: { kind: 'user', rpcId: this.jobs.get(sessionId).rpcId } });
+            agent.followup({ id: randomUUID(), role: 'user', content, source: { kind: 'user', rpcId: this.jobs.get(sessionId).rpcId } });
             const text = await result;
             await agent.whenIdle(); // Result already correlated by rpcId/turn, never by this wait alone.
             return { text, sessionId };
@@ -126,6 +147,12 @@ export class HostModel {
                 this.handles.delete(sessionId);
             }
         }
+    }
+    async requireVision(selection, signal) {
+        const info = await this.host.llm.resolveModelInfo(selection.provider, selection.model, signal);
+        signal.throwIfAborted();
+        if (!info.inputModalities?.includes('image'))
+            throw new PilotError('DEFAULT_MODEL_VISION_UNAVAILABLE');
     }
     async session(privateChat, signal) {
         if (this.disposed)

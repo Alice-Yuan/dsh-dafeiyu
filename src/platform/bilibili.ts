@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import { decimalId, LIMITS, PilotError, type Account, type BiliPort, type Comment, type CommentPage, type SendReceipt, type SendTarget, type VideoMaterial, type Visibility } from '../pilot/contracts.js';
 import { credentialOf, type Credential, type Vault } from './vault.js';
+import { type MediaReader } from './media.js';
 
 type Obj = Record<string, unknown>;
 function obj(value: unknown): Obj { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PilotError('PLATFORM_SCHEMA_CHANGED'); return value as Obj; }
@@ -42,7 +43,7 @@ export function signWbi(params: Record<string, string>, img: string, sub: string
 }
 export class Bilibili implements BiliPort {
   private login: { id: string; key: string; expires: number; lastPoll: number } | null = null;
-  constructor(private readonly vault: Vault, private readonly fetcher: typeof fetch = fetch, private readonly now = Date.now) {}
+  constructor(private readonly vault: Vault, private readonly fetcher: typeof fetch = fetch, private readonly now = Date.now, private readonly media?: MediaReader) {}
   async hasCredential(): Promise<Account | null> { const c = await this.vault.read(); return c ? { uid: c.uid, name: '' } : null; }
   private async raw(url: string, signal: AbortSignal, credential: Credential | null = null, body?: URLSearchParams): Promise<{ data: Obj; headers: Headers }> {
     const u = new URL(url);
@@ -94,7 +95,19 @@ export class Bilibili implements BiliPort {
       if (!response.ok) throw new PilotError('SUBTITLE_UNAVAILABLE');
       subtitle = list(obj(parseLossless(await boundedText(response))).body).map(v => str(obj(v).content, 2000)).join('\n').slice(0, 20_000);
     }
-    return { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
+    const material: VideoMaterial = { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
+    if (!subtitle?.trim() && this.media) {
+      if (typeof data.duration !== 'number' || !Number.isFinite(data.duration) || data.duration <= 0 || data.duration > 600) throw new PilotError('MEDIA_DURATION_LIMIT');
+      // Bind the stream to the server-resolved first-page cid; never take a client URL.
+      const playback = (await this.raw(API + `/x/player/playurl?bvid=${bvid}&avid=${aid}&cid=${cid}&qn=16&fnval=16&fourk=0`, signal, await this.credential())).data;
+      const dash = obj(playback.dash);
+      if (typeof dash.duration !== 'number' || Math.abs(dash.duration - data.duration) > 2 || typeof playback.timelength !== 'number' || Math.abs(playback.timelength / 1000 - data.duration) > 2) throw new PilotError('MEDIA_METADATA_INVALID');
+      const streams = list(dash.video).map(obj).filter(v => typeof v.codecs === 'string' && v.codecs.startsWith('avc1.') && typeof v.width === 'number' && typeof v.height === 'number' && v.width > 0 && v.height > 0 && v.width * v.height <= 1920 * 1080)
+        .sort((a, b) => Number(a.width) * Number(a.height) - Number(b.width) * Number(b.height));
+      const stream = streams[0]; if (!stream) throw new PilotError('MEDIA_FORMAT_UNSUPPORTED');
+      material.visual = await this.media.read(str(stream.baseUrl ?? stream.base_url, 16_000), playback.timelength / 1000, signal);
+    }
+    return material;
   }
   async comments(aid: string, root: string, cursor: string | null, authenticated: boolean, signal: AbortSignal): Promise<CommentPage> {
     decimalId(aid); decimalId(root);

@@ -55,11 +55,13 @@ export class Bilibili {
     vault;
     fetcher;
     now;
+    media;
     login = null;
-    constructor(vault, fetcher = fetch, now = Date.now) {
+    constructor(vault, fetcher = fetch, now = Date.now, media) {
         this.vault = vault;
         this.fetcher = fetcher;
         this.now = now;
+        this.media = media;
     }
     async hasCredential() { const c = await this.vault.read(); return c ? { uid: c.uid, name: '' } : null; }
     async raw(url, signal, credential = null, body) {
@@ -135,7 +137,23 @@ export class Bilibili {
                 throw new PilotError('SUBTITLE_UNAVAILABLE');
             subtitle = list(obj(parseLossless(await boundedText(response))).body).map(v => str(obj(v).content, 2000)).join('\n').slice(0, 20_000);
         }
-        return { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
+        const material = { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
+        if (!subtitle?.trim() && this.media) {
+            if (typeof data.duration !== 'number' || !Number.isFinite(data.duration) || data.duration <= 0 || data.duration > 600)
+                throw new PilotError('MEDIA_DURATION_LIMIT');
+            // Bind the stream to the server-resolved first-page cid; never take a client URL.
+            const playback = (await this.raw(API + `/x/player/playurl?bvid=${bvid}&avid=${aid}&cid=${cid}&qn=16&fnval=16&fourk=0`, signal, await this.credential())).data;
+            const dash = obj(playback.dash);
+            if (typeof dash.duration !== 'number' || Math.abs(dash.duration - data.duration) > 2 || typeof playback.timelength !== 'number' || Math.abs(playback.timelength / 1000 - data.duration) > 2)
+                throw new PilotError('MEDIA_METADATA_INVALID');
+            const streams = list(dash.video).map(obj).filter(v => typeof v.codecs === 'string' && v.codecs.startsWith('avc1.') && typeof v.width === 'number' && typeof v.height === 'number' && v.width > 0 && v.height > 0 && v.width * v.height <= 1920 * 1080)
+                .sort((a, b) => Number(a.width) * Number(a.height) - Number(b.width) * Number(b.height));
+            const stream = streams[0];
+            if (!stream)
+                throw new PilotError('MEDIA_FORMAT_UNSUPPORTED');
+            material.visual = await this.media.read(str(stream.baseUrl ?? stream.base_url, 16_000), playback.timelength / 1000, signal);
+        }
+        return material;
     }
     async comments(aid, root, cursor, authenticated, signal) {
         decimalId(aid);

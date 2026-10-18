@@ -8,8 +8,10 @@ export const REQUESTS = {
     loginPoll: z.object({ loginId: z.string().uuid() }).strict(),
     logout: z.object({}).strict(),
     preflight: z.object({}).strict(),
+    inspectVideo: z.object({}).strict(),
     chat: z.object({ text: z.string().min(1).max(4000) }).strict(),
     start: z.object({ revision: z.string().max(64), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+    startMediaTrial: z.object({ revision: z.string().max(64), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
     stop: z.object({}).strict(),
     reconcile: z.object({}).strict(),
 };

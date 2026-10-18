@@ -29,8 +29,9 @@ async function probe(config) {
     const persist = await module('dsh-session-persistence-jsonl'); await ctx.plugin(persist, { root: join(config.dir, 'sessions') }).await();
     const { TYPERT } = await import(pathToFileURL(join(config.project, 'dist/host/typert.js')).href);
     const { validateTypertManifest } = await module('dsh-typert-loader'); validateTypertManifest('dsh-dafeiyu', TYPERT); ctx.typert.register(TYPERT);
-    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 10);
-    report.checks.push('installed Typert validator and registry accept all ten strict endpoints');
+    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 12);
+    report.checks.push('installed Typert validator and registry accept all twelve strict endpoints');
+    await ctx.plugin((await module('dsh-attachment-local')).default, { dshHome: join(config.dir, 'attachment-home') }).await();
     const { HostModel } = await import(pathToFileURL(join(config.project, 'dist/host/model.js')).href);
     const { PilotStore } = await import(pathToFileURL(join(config.project, 'dist/pilot/store.js')).href);
     const { DEFAULT_CONFIG } = await import(pathToFileURL(join(config.project, 'dist/pilot/contracts.js')).href);
@@ -44,7 +45,8 @@ async function probe(config) {
     ctx.systemPrompt.context({ name: 'working-directory:current', order: 1, required: true, text: 'HOST_REQUIRED_DIRECTORY_CANARY' });
     const captures = [];
     const { LlmAdapter } = await module('dsh-llm');
-    class Adapter extends LlmAdapter { async *stream(request) { captures.push(request); yield { type: 'text-delta', index: 0, text: 'Synthetic response' }; yield { type: 'finish', reason: { kind: 'stop' } }; } }
+    let vision = true;
+    class Adapter extends LlmAdapter { async resolveModel(provider, id) { return { provider, id, name: id, inputModalities: vision ? ['text', 'image'] : ['text'] }; } async *stream(request) { captures.push(request); yield { type: 'text-delta', index: 0, text: 'Synthetic response' }; yield { type: 'finish', reason: { kind: 'stop' } }; } }
     ctx.llm.registerAdapter(['synthetic'], new Adapter());
     ctx.on('agent/error', event => { report.agentError = String(event.error?.message); }, { global: true });
     ctx.on('session/event', (_session, event) => { if (event.type === 'turn/end') report.lastTurn = event.data.reason; }, { global: true });
@@ -63,7 +65,15 @@ async function probe(config) {
     assert.equal(second.sessionId, first.sessionId);
     assert.ok(JSON.stringify(captures[1].messages).includes('SYNTHETIC_PRIVATE_CANARY'));
     assert.ok(JSON.stringify(captures[1].messages).includes('SYNTHETIC_RECEIPT'));
-    const third = await model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'SYNTHETIC_PUBLIC' }, sig);
+    const frames = [{ atSeconds: 0, sha256: 'synthetic', jpeg: Buffer.from('/9j/4AAQSkZJRgABAgAAAQABAAD//gAQTGF2YzYxLjE5LjEwMQD/2wBDAAgEBAQEBAUFBQUFBQYGBgYGBgYGBgYGBgYHBwcICAgHBwcGBgcHCAgICAkJCQgICAgJCQoKCgwMCwsODg4RERT/xABNAAEBAAAAAAAAAAAAAAAAAAAABgEBAQEAAAAAAAAAAAAAAAAAAAYHEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/8AAEQgAIAAgAwEiAAIRAAMRAP/aAAwDAQACEQMRAD8AiwEo38AAAAAB/9k=', 'base64') }];
+    vision = false;
+    await assert.rejects(model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'SYNTHETIC_PUBLIC', frames }, sig), /DEFAULT_MODEL_VISION_UNAVAILABLE/);
+    assert.equal(store.budget().used, 2); vision = true;
+    const third = await model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'SYNTHETIC_PUBLIC', frames }, sig);
+    const image = captures[2].messages.flatMap(m => m.content).find(b => b.type === 'image');
+    assert.match(image?.attachment?.attachmentId, /^sha256:/); assert.equal(image.attachment.width, 32);
+    assert.ok((await ctx.attachments.readImage(image.attachment)).data.byteLength > 0);
+    report.checks.push('actual attachment store and Agent loop preserve JPEG frame; text-only route rejected before budget reservation');
     assert.notEqual(third.sessionId, first.sessionId); assert.ok(!JSON.stringify(captures[2]).includes('SYNTHETIC_PRIVATE_CANARY'));
     assert.ok(!JSON.stringify(captures[2]).includes('HOST_REQUIRED_DIRECTORY_CANARY'));
     report.checks.push('required working-directory context is shadowed in private/public agent scopes');

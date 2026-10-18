@@ -15,14 +15,14 @@ export interface ClientContext {
       component: (props: DetailProps) => ReactElement | null): unknown;
   };
 }
-interface Snapshot { config: PilotConfig; revision: string; budget: { used: number; total: number; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string } }
+interface Snapshot { config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string } }
 export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [status, setStatus] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<PilotConfig>({ ...DEFAULT_CONFIG });
   const [revision, setRevision] = useState(''); const dirty = useRef(false);
   const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState<{ loginId: string; image: string; expiresAt: number } | null>(null);
-  const [preflight, setPreflight] = useState<{ account: { uid: string; name: string }; video: { title: string; bvid: string; hasSubtitle: boolean }; commentsRead: number; revision: string } | null>(null);
+  const [preflight, setPreflight] = useState<{ account: { uid: string; name: string }; video: { title: string; bvid: string; hasSubtitle: boolean; frameCount?: number; durationSeconds?: number }; commentsRead: number; revision: string } | null>(null);
   const [chat, setChat] = useState('你好，大肥鱼。'); const [answer, setAnswer] = useState('');
   const mounted = useRef(true);
   const call = async (method: Method, request: unknown = {}, signal?: AbortSignal): Promise<any> => {
@@ -68,9 +68,11 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const field = (label: string, key: keyof PilotConfig) => h('label', { style: { display: 'block', margin: '12px 0' } }, label,
     h(key === 'persona' ? 'textarea' : 'input', { value: draft[key], onChange: (e: { target: { value: string } }) => edit(key, e.target.value), style: { display: 'block', width: '100%', padding: 8, boxSizing: 'border-box' } }));
   const visible = (value: boolean | null) => value === true ? '已观察到' : '未确认';
+  let videoText = '';
+  if (status?.videoInspection) { try { const v = JSON.parse(status.videoInspection); videoText = [v.analysis.summary, ...v.analysis.observations.map((o: { atSeconds: number; description: string }) => `${o.atSeconds.toFixed(1)} 秒：${o.description}`), '理解范围：画面采样，音频未转写。', ...v.analysis.limitations].join('\n'); } catch { videoText = '内容理解记录无法读取，请查看诊断。'; } }
   return h('section', { 'aria-label': '大肥鱼设置', 'data-mode': 'pilot', style: { padding: 24, border: '1px solid #71809666', borderRadius: 16, maxWidth: 760 } },
     h('small', null, 'DaFeiYu · 单视频实验版'), h('h2', null, '大肥鱼'),
-    h('p', { role: 'status' }, status ? `模型请求 ${status.budget.used} / 5 · ${status.run?.state ?? '尚未启动'} · 15 分钟 / 1 条评论 / 2 条回复` : '尚未连接 Desktop 运行状态'),
+    h('p', { role: 'status' }, status ? `本轮模型请求 ${status.budget.used} / ${status.budget.total} · 累计 ${status.budget.lifetimeUsed ?? status.budget.used} · ${status.run?.state ?? '尚未启动'} · 15 分钟 / 1 条评论 / 2 条回复` : '尚未连接 Desktop 运行状态'),
     error ? h('p', { role: 'alert', style: { color: '#e15b64', overflowWrap: 'anywhere' } }, error) : null,
     status?.configError || status?.credentialError ? h('p', { role: 'alert' }, status.configError || status.credentialError) : null,
     notice ? h('p', null, notice) : null,
@@ -83,15 +85,21 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     button('移除本地登录凭证', () => act(async () => { setQr(null); setPreflight(null); await call('logout'); }), !!status?.busy),
     qr ? h('img', { src: qr.image, alt: '用大肥鱼账号扫描 B站登录二维码', width: 240, height: 240 }) : null,
     button('只读预检', () => act(async () => { setPreflight(await call('preflight')); }), dirty.current || !status?.account || !!status?.busy),
-    preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : '无字幕，不会声称看完视频'}`) : null,
+    preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : `无字幕，已获取 ${preflight.video.frameCount ?? 0} 张实际视频帧；音频未转写`}`) : null,
+    h('h3', null, '视频内容'),
+    h('p', null, '无字幕时读取实际视频并采样最多 12 帧，最多 10 分钟/64 MiB；当前只理解画面，音频未转写，不会推测音乐或对白。理解视频占用现有公开判断额度 1 次，不启动评论。帧附件由 DSH 随会话保留。'),
+    button('读取并理解视频（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspectionConsumed || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    videoText ? h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, videoText) : null,
     h('h3', null, '主人会话'), h('p', null, '首次验收预留 1 次私聊请求；活动结束的汇报另预留 1 次。'),
     h('textarea', { value: chat, onChange: (e: { target: { value: string } }) => setChat(e.target.value), maxLength: 4000, 'aria-label': '给大肥鱼的消息', style: { width: '100%', minHeight: 70 } }),
-    button('发送到大肥鱼会话', () => act(async () => { const result = await call('chat', { text: chat }); setAnswer(result.text); }), !chat.trim() || !!status?.budget.byPurpose.private || !!status?.busy),
+    button('发送到大肥鱼会话', () => act(async () => { const result = await call('chat', { text: chat }); setAnswer(result.text); }), !chat.trim() || status?.budget.grant === 'media-trial-2' || !!status?.budget.byPurpose.private || !!status?.busy),
     answer ? h('p', { style: { whiteSpace: 'pre-wrap' } }, answer) : null,
     status?.privateSessionId ? h('p', null, '持久会话已建立，可在侧栏打开「大肥鱼 · 主人会话」。') : null,
     h('h3', null, '限定视频试跑'),
     h('p', null, '启动即允许在上述视频公开发言，最多 1 条评论和 2 条直接回复；单条最多 150 字。到期、取消或重启不续跑，额度不自动重置。'),
     button('启动一次 15 分钟试跑', () => act(async () => { await call('start', { revision: preflight!.revision, accountUid: preflight!.account.uid }); setNotice('试跑已启动。'); }), !preflight || dirty.current || preflight.revision !== status?.revision || !!status?.trialConsumed || !!status?.busy),
+    status?.trialConsumed ? h('p', null, '完成视频内容理解后，可手动启动获准的第二次试跑：相同账号和视频，15 分钟、1 评论/2 回复，独立新增 4 次请求（公开判断 3 次、汇报 1 次）。旧记录保留，本次仍只能启动一次。') : null,
+    status?.trialConsumed ? button('启动第二次媒体试跑（15 分钟）', () => act(async () => { await call('startMediaTrial', { revision: preflight!.revision, accountUid: preflight!.account.uid }); setNotice('第二次试跑已启动，旧记录已保留。'); }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !!status?.mediaTrialConsumed || !!status?.busy) : null,
     h('button', { type: 'button', disabled: !ctx || !status?.busy, onClick: () => { void call('stop').then(() => refresh()).catch(e => setError(e instanceof Error ? e.message : '停止失败')); }, style: { padding: '8px 14px' } }, '立即停止'),
     button('仅核对发送回执', () => act(async () => { await call('reconcile'); }), !!status?.busy),
     ...(status?.actions ?? []).map(a => h('article', { key: a.id, style: { borderTop: '1px solid #71809666', paddingTop: 12, marginTop: 12 } },

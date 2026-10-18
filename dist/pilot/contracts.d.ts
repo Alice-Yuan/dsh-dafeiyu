@@ -28,6 +28,20 @@ export interface Account {
     uid: string;
     name: string;
 }
+export interface VideoFrame {
+    atSeconds: number;
+    sha256: string;
+    jpeg: Uint8Array;
+}
+export interface VisualMaterial {
+    source: 'video-stream';
+    durationSeconds: number;
+    streamSha256: string;
+    downloadedBytes: number;
+    frames: VideoFrame[];
+    audio: 'not-transcribed';
+    coverage: 'sampled-frames';
+}
 export interface VideoMaterial {
     bvid: string;
     aid: string;
@@ -35,6 +49,7 @@ export interface VideoMaterial {
     title: string;
     description: string;
     subtitle: string | null;
+    visual?: VisualMaterial;
 }
 export interface Comment {
     id: string;
@@ -75,6 +90,7 @@ export interface ModelRequest {
     purpose: Purpose;
     prompt: string;
     persona: string;
+    frames?: VideoFrame[] | undefined;
 }
 export interface PilotModel {
     ask(request: ModelRequest, signal: AbortSignal): Promise<{

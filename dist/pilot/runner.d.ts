@@ -1,5 +1,5 @@
 import { type Account, type BiliPort, type Comment, type PilotConfig, type PilotModel, type VideoMaterial } from './contracts.js';
-import { PilotStore, type Run } from './store.js';
+import { PilotStore, type Run, type Grant } from './store.js';
 interface Options {
     now?: () => number;
     sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -21,7 +21,7 @@ export declare class PilotRunner {
         video: VideoMaterial;
         comments: Comment[];
     }>;
-    start(expectedAccount: string, signal: AbortSignal): Promise<Run>;
+    start(expectedAccount: string, signal: AbortSignal, grant?: Grant): Promise<Run>;
     private readPages;
     private active;
     private execute;

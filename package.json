@@ -1,6 +1,6 @@
 {
   "name": "dsh-dafeiyu",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "description": "大肥鱼：寄宿于 DeepSeek Harness Desktop 的个人 AI 实验插件，支持受限会话与手动启动的 B站单视频互动试验。真实能力以运行诊断和验收结果为准。",
   "repository": {

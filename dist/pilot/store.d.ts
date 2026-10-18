@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { type PilotConfig, type Purpose, type SendTarget, type Visibility } from './contracts.js';
+export type Grant = 'initial' | 'media-trial-2';
 export interface Run {
     id: string;
     accountUid: string;
@@ -9,6 +10,7 @@ export interface Run {
     state: string;
     reason: string;
     root: string;
+    grant?: Grant;
 }
 export interface Action {
     id: string;
@@ -33,13 +35,15 @@ export declare class PilotStore {
     set(key: string, value: string): void;
     assertOwner(ownerUid: string): void;
     bindOwner(ownerUid: string): void;
-    budget(): {
+    budget(grant?: Grant): {
         used: number;
         total: number;
         byPurpose: Record<Purpose, number>;
+        lifetimeUsed: number;
+        grant: Grant;
     };
     reserveRequest(purpose: Purpose, now: number): string;
-    begin(config: PilotConfig, accountUid: string, now: number): Run;
+    begin(config: PilotConfig, accountUid: string, now: number, grant?: Grant): Run;
     runs(): Run[];
     run(id: string): Run;
     saveRun(run: Run): void;

@@ -16,10 +16,15 @@ export declare const REQUESTS: {
     }, z.core.$strict>;
     readonly logout: z.ZodObject<{}, z.core.$strict>;
     readonly preflight: z.ZodObject<{}, z.core.$strict>;
+    readonly inspectVideo: z.ZodObject<{}, z.core.$strict>;
     readonly chat: z.ZodObject<{
         text: z.ZodString;
     }, z.core.$strict>;
     readonly start: z.ZodObject<{
+        revision: z.ZodString;
+        accountUid: z.ZodString;
+    }, z.core.$strict>;
+    readonly startMediaTrial: z.ZodObject<{
         revision: z.ZodString;
         accountUid: z.ZodString;
     }, z.core.$strict>;

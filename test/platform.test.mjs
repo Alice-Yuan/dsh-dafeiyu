@@ -66,6 +66,20 @@ test('video lookup binds BV/aid and sends no cookies to the subtitle CDN', async
   await assert.rejects(wrong.video(target.bvid, signal()), /VIDEO_UNAVAILABLE/);
 });
 
+test('no-subtitle media is resolved from verified BV/aid/cid and rejects mismatched duration', async () => {
+ let duration=54, captured=0;
+ const adapter=new Bilibili(vault(),async url=>{
+  const u=new URL(url);
+  if(u.pathname==='/x/web-interface/view')return ok({bvid:target.bvid,aid:target.aid,cid:'20002',state:0,title:'Synthetic',desc:'',duration:54});
+  if(u.pathname==='/x/web-interface/nav')return ok(nav);
+  if(u.pathname==='/x/player/wbi/v2')return ok({subtitle:{subtitles:[]}});
+  assert.equal(u.pathname,'/x/player/playurl');assert.equal(u.searchParams.get('avid'),target.aid);assert.equal(u.searchParams.get('cid'),'20002');
+  return ok({timelength:duration*1000,dash:{duration,video:[{codecs:'avc1.synthetic',width:640,height:360,baseUrl:'https://upos-synthetic.bilivideo.com/upgcxcode/a'}]}});
+ },Date.now,{read:async(url,seconds)=>{captured++;assert.equal(seconds,54);return {source:'video-stream',frames:[],audio:'not-transcribed'};}});
+ const video=await adapter.video(target.bvid,signal());assert.equal(video.visual.source,'video-stream');assert.equal(captured,1);
+ duration=99;await assert.rejects(adapter.video(target.bvid,signal()),/MEDIA_METADATA_INVALID/);assert.equal(captured,1);
+});
+
 test('subtitle absence is explicit and untrusted subtitle URLs are rejected', async () => {
   let sub = [];
   const adapter = new Bilibili(vault(), async url => {

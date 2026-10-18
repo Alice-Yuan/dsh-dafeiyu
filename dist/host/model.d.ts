@@ -67,6 +67,18 @@ export interface PolicyContext {
     on(name: string, fn: (...args: any[]) => unknown): () => void;
 }
 export interface ModelHost {
+    llm: {
+        resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{
+            inputModalities?: string[];
+        }>;
+    };
+    attachments: {
+        saveImages(inputs: {
+            data: Uint8Array;
+            mediaType: 'image/jpeg';
+            name: string;
+        }[]): Promise<unknown[]>;
+    };
     agents: {
         create(options: Record<string, unknown>): Promise<AgentHandle>;
         resume(options: Record<string, unknown>): Promise<AgentHandle>;
@@ -101,6 +113,7 @@ export declare class HostModel implements PilotModel {
         sessionId: string;
     }>;
     private perform;
+    private requireVision;
     private session;
     recordReport(text: string): Promise<void>;
     dispose(): Promise<void>;

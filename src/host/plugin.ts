@@ -10,6 +10,8 @@ import { Bilibili } from '../platform/bilibili.js';
 import { WindowsVault } from '../platform/vault.js';
 import { HostModel, type ModelHost, type PolicyContext } from './model.js';
 import { REQUESTS, type Method } from '../shared/remote.js';
+import { FfmpegMediaReader } from '../platform/media.js';
+import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
 
 interface Ref<T> { get(): T }
 type LiveConfig = { [K in keyof PilotConfig]: Ref<PilotConfig[K]> };
@@ -18,7 +20,7 @@ interface HostContext extends Context {
   configEditor: { edit(entry: unknown, change: (current: Record<string, unknown>) => unknown): Promise<void> };
 }
 export const name = 'dafeyu';
-export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert'];
+export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert', 'llm', 'attachments'];
 export const Config = s.object({
   ownerUid: s.string().pattern(/^(|[1-9]\d{0,24})$/).default('').volatile(),
   bvid: s.string().pattern(/^(|BV[1-9A-HJ-NP-Za-km-z]{10})$/).default('').volatile(),
@@ -30,6 +32,7 @@ export class DaFeiYuControl extends TypertRemoteService {
   private modelValue: HostModel | null = null;
   private runnerValue: PilotRunner | null = null;
   private platformValue: Bilibili | null = null;
+  private mediaController: AbortController | null = null;
   private readonly lifetime = new AbortController();
   private serial: Promise<unknown> = Promise.resolve();
   private operations = new Set<Promise<unknown>>();
@@ -46,10 +49,17 @@ export class DaFeiYuControl extends TypertRemoteService {
     return this.storeValue;
   }
   private platform(): Bilibili {
-    return this.platformValue ??= new Bilibili(new WindowsVault(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'bilibili.dpapi')));
+    return this.platformValue ??= new Bilibili(new WindowsVault(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'bilibili.dpapi')), fetch, Date.now,
+      new FfmpegMediaReader(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'media-temp')));
   }
   private model(): HostModel { return this.modelValue ??= new HostModel(this.owner as unknown as ModelHost, () => this.store(), () => this.currentConfig()); }
   private runner(): PilotRunner { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
+  private async mediaOperation<T>(signal: AbortSignal, action: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.mediaController || this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
+    const controller = new AbortController(); this.mediaController = controller;
+    try { return await action(AbortSignal.any([signal, controller.signal])); }
+    finally { this.mediaController = null; }
+  }
   installPolicy(ctx: PolicyContext, audience: 'private' | 'public'): void { this.model().installPolicy(ctx, audience); }
   private async call(method: Method, request: unknown, signal: AbortSignal, action: (value: any, signal: AbortSignal) => Promise<unknown>, exclusive = true): Promise<any> {
     // Model-originated calls have no authenticated owner Peer.
@@ -70,9 +80,10 @@ export class DaFeiYuControl extends TypertRemoteService {
       try { account = await this.platform().hasCredential(); } catch (error) { credentialError = safeError(error); }
       return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
         configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-        busy: this.runnerValue?.busy ?? false, run: store.runs()[0] ?? null, actions: store.actions(),
+        busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
-        diagnostic: { version: '0.1.0-alpha.5', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+        videoInspection: store.get('videoInspection'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
+        diagnostic: { version: '0.1.0-alpha.6', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
     }, false);
   }
   @Remote
@@ -109,11 +120,32 @@ export class DaFeiYuControl extends TypertRemoteService {
   }
   @Remote
   preflight(request: unknown, signal: AbortSignal): Promise<unknown> {
-    return this.call('preflight', request, signal, async (_value, lifetime) => {
+    return this.call('preflight', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async lifetime => {
       if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
       const result = await this.runner().preflight(lifetime);
-      return { account: result.account, video: { bvid: result.video.bvid, title: result.video.title, hasSubtitle: result.video.subtitle !== null }, commentsRead: result.comments.length, revision: this.revision() };
-    });
+      return { account: result.account, video: { bvid: result.video.bvid, title: result.video.title, hasSubtitle: !!result.video.subtitle?.trim(), frameCount: result.video.visual?.frames.length ?? 0, durationSeconds: result.video.visual?.durationSeconds ?? null, audio: result.video.visual?.audio ?? 'not-transcribed' }, commentsRead: result.comments.length, revision: this.revision() };
+    }));
+  }
+  @Remote
+  inspectVideo(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('inspectVideo', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async lifetime => {
+      if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
+      const store = this.store(); if (store.get('videoInspectionConsumed')) throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
+      const config = configOf(this.currentConfig(), true), result = await this.runner().preflight(lifetime);
+      if (!result.video.visual?.frames.length && !result.video.subtitle?.trim()) throw new PilotError('VIDEO_CONTENT_UNAVAILABLE');
+      const budget = store.budget(); if (budget.used >= LIMITS.requests || budget.byPurpose.public >= 3) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
+      // This explicit read-only analysis spends the existing public request budget. It never rearms a trial.
+      store.set('videoInspectionConsumed', 'true');
+      const answer = await this.model().ask({ purpose: 'public', persona: config.persona, frames: result.video.visual?.frames,
+        prompt: `${MEDIA_INSTRUCTION}请理解这个视频的实际内容。仅返回 JSON：{"summary":"简短概述","observations":[{"atSeconds":0,"description":"该时刻实际可见的内容"}],"limitations":["尚不能判断的内容"]}。观察时刻必须来自所提供的采样帧，音频未转写必须明确说明。\n` + JSON.stringify(publicVideo(result.video)) }, lifetime);
+      let value: any; try { value = JSON.parse(answer.text); } catch { throw new PilotError('INVALID_VIDEO_ANALYSIS'); }
+      const times = result.video.visual?.frames.map(f => f.atSeconds) ?? [];
+      if (!value || typeof value.summary !== 'string' || value.summary.length > 2000 || !Array.isArray(value.observations) || value.observations.length > 12 ||
+          value.observations.some((o: any) => !o || typeof o.atSeconds !== 'number' || typeof o.description !== 'string' || o.description.length > 1000 || !times.some(t => Math.abs(t - o.atSeconds) < 0.1)) ||
+          !Array.isArray(value.limitations) || value.limitations.length > 12 || value.limitations.some((s: any) => typeof s !== 'string' || s.length > 1000)) throw new PilotError('INVALID_VIDEO_ANALYSIS');
+      const report = { video: `https://www.bilibili.com/video/${config.bvid}/`, accountUid: result.account.uid, material: publicVideo(result.video), analysis: { summary: value.summary, observations: value.observations.map((o: any) => ({ atSeconds: o.atSeconds, description: o.description })), limitations: value.limitations }, audio: 'not-transcribed', sessionId: answer.sessionId };
+      store.set('videoInspection', JSON.stringify(report)); return report;
+    }));
   }
   @Remote
   chat(request: unknown, signal: AbortSignal): Promise<unknown> {
@@ -130,8 +162,16 @@ export class DaFeiYuControl extends TypertRemoteService {
     });
   }
   @Remote
+  startMediaTrial(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('startMediaTrial', request, signal, async (value, lifetime) => {
+      if (value.revision !== this.revision()) throw new PilotError('CONFIG_REVISION_CONFLICT');
+      if (!this.store().get('videoInspection')) throw new PilotError('MEDIA_TRIAL_NOT_READY');
+      return this.runner().start(value.accountUid, lifetime, 'media-trial-2');
+    });
+  }
+  @Remote
   stop(request: unknown, signal: AbortSignal): Promise<unknown> {
-    return this.call('stop', request, signal, async () => { await this.runnerValue?.stop(); return { stopped: true }; }, false);
+    return this.call('stop', request, signal, async () => { this.mediaController?.abort(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
   }
   @Remote
   reconcile(request: unknown, signal: AbortSignal): Promise<unknown> {

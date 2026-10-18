@@ -24,7 +24,9 @@ export function configOf(input: unknown, complete = false): PilotConfig {
   return out;
 }
 export interface Account { uid: string; name: string }
-export interface VideoMaterial { bvid: string; aid: string; cid: string; title: string; description: string; subtitle: string | null }
+export interface VideoFrame { atSeconds: number; sha256: string; jpeg: Uint8Array }
+export interface VisualMaterial { source: 'video-stream'; durationSeconds: number; streamSha256: string; downloadedBytes: number; frames: VideoFrame[]; audio: 'not-transcribed'; coverage: 'sampled-frames' }
+export interface VideoMaterial { bvid: string; aid: string; cid: string; title: string; description: string; subtitle: string | null; visual?: VisualMaterial }
 export interface Comment { id: string; uid: string; root: string; parent: string; text: string; createdAt: number }
 export interface CommentPage { comments: Comment[]; next: string | null }
 export interface SendTarget { bvid: string; aid: string; root: string; parent: string }
@@ -38,7 +40,7 @@ export interface BiliPort {
   verify(target: SendTarget, id: string, uid: string, signal: AbortSignal): Promise<Visibility>;
 }
 export type Purpose = 'private' | 'public' | 'summary';
-export interface ModelRequest { purpose: Purpose; prompt: string; persona: string }
+export interface ModelRequest { purpose: Purpose; prompt: string; persona: string; frames?: VideoFrame[] | undefined }
 export interface PilotModel {
   ask(request: ModelRequest, signal: AbortSignal): Promise<{ text: string; sessionId: string }>;
   recordReport(text: string): Promise<void>;

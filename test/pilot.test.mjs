@@ -47,6 +47,32 @@ test('pilot store preserves owner and request quotas across restarts and refuses
   store.close(); const reopened = new PilotStore(path); t.after(() => reopened.close());
   assert.equal(reopened.budget().used, 5); assert.throws(() => reopened.reserveRequest('private', 5));
 });
+
+test('second media grant retains initial history and cannot replenish or resume after restart', t => {
+ const {store,path}=fixture(t);store.reserveRequest('private',1);store.reserveRequest('public',2);store.reserveRequest('summary',3);
+ const first=store.begin(config,'30001',100);store.saveRun({...first,state:'completed',reason:'MODEL_SKIPPED'});store.set('latestReport','original-receipt');
+ assert.throws(()=>store.begin(config,'30001',200,'media-trial-2'),/MEDIA_TRIAL_NOT_READY/);
+ store.set('videoInspection',JSON.stringify({accountUid:'30001',material:{bvid:config.bvid,subtitle:'synthetic'},analysis:{summary:'synthetic'}}));
+ assert.throws(()=>store.begin(config,'30002',200,'media-trial-2'),/MEDIA_TRIAL_NOT_READY/);
+ const second=store.begin(config,'30001',200,'media-trial-2');
+ assert.equal(store.budget().total,4);assert.equal(store.budget().used,0);assert.equal(store.budget().lifetimeUsed,3);assert.equal(store.budget('initial').used,3);
+ assert.equal(store.get('report:'+first.id),'original-receipt');assert.equal(store.get('trialConsumed'),first.id);assert.equal(store.runs().length,2);
+ assert.throws(()=>store.reserveRequest('private',201),/MODEL_BUDGET_EXHAUSTED/);
+ for(let i=0;i<3;i++)store.reserveRequest('public',201+i);store.reserveRequest('summary',205);
+ assert.throws(()=>store.reserveRequest('public',206),/MODEL_BUDGET_EXHAUSTED/);
+ store.close();const reopened=new PilotStore(path);t.after(()=>reopened.close());
+ assert.equal(reopened.run(second.id).state,'interrupted');assert.equal(reopened.budget().used,4);assert.equal(reopened.budget().lifetimeUsed,7);
+ assert.throws(()=>reopened.begin(config,'30001',300,'media-trial-2'),/TRIAL_ALREADY_CONSUMED/);
+ assert.throws(()=>reopened.begin(config,'30001',300),/TRIAL_ALREADY_CONSUMED/);
+});
+
+test('visual trial passes separate image frames and excludes previous run skip reasons',async t=>{
+ const f=setup(t);f.platform.video=async()=>({bvid:config.bvid,aid:'20001',cid:'20002',title:'Synthetic',description:'',subtitle:null,
+ visual:{source:'video-stream',durationSeconds:54,streamSha256:'synthetic',downloadedBytes:4,audio:'not-transcribed',coverage:'sampled-frames',frames:[{atSeconds:1,jpeg:new Uint8Array([255,216,255,217]),sha256:'synthetic'}]}});
+ f.store.set('lastSkipReason','old-run-reason');await f.runner.start('30001',new AbortController().signal);await f.runner.idle();
+ assert.equal(f.inputs[0].frames.length,1);assert.ok(!f.inputs[0].prompt.includes('jpeg'));assert.ok(f.inputs[0].prompt.includes('not-transcribed'));
+ assert.equal(JSON.parse(f.store.get('latestReport')).skipped,null);
+});
 test('pilot hard limits: one comment and two direct replies; no private marker in public input', async t => {
   const f = setup(t); await f.runner.start('30001', new AbortController().signal); await f.runner.idle();
   assert.equal(f.sent.length, 3); assert.equal(f.sent[0].target.root, '0');

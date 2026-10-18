@@ -190,8 +190,10 @@ var REQUESTS = {
   loginPoll: import_zod.z.object({ loginId: import_zod.z.string().uuid() }).strict(),
   logout: import_zod.z.object({}).strict(),
   preflight: import_zod.z.object({}).strict(),
+  inspectVideo: import_zod.z.object({}).strict(),
   chat: import_zod.z.object({ text: import_zod.z.string().min(1).max(4e3) }).strict(),
   start: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  startMediaTrial: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
   stop: import_zod.z.object({}).strict(),
   reconcile: import_zod.z.object({}).strict()
 };
@@ -339,12 +341,21 @@ function SettingsPanel({ ctx }) {
     (0, import_react.createElement)(key === "persona" ? "textarea" : "input", { value: draft[key], onChange: (e) => edit(key, e.target.value), style: { display: "block", width: "100%", padding: 8, boxSizing: "border-box" } })
   );
   const visible = (value) => value === true ? "\u5DF2\u89C2\u5BDF\u5230" : "\u672A\u786E\u8BA4";
+  let videoText = "";
+  if (status?.videoInspection) {
+    try {
+      const v = JSON.parse(status.videoInspection);
+      videoText = [v.analysis.summary, ...v.analysis.observations.map((o) => `${o.atSeconds.toFixed(1)} \u79D2\uFF1A${o.description}`), "\u7406\u89E3\u8303\u56F4\uFF1A\u753B\u9762\u91C7\u6837\uFF0C\u97F3\u9891\u672A\u8F6C\u5199\u3002", ...v.analysis.limitations].join("\n");
+    } catch {
+      videoText = "\u5185\u5BB9\u7406\u89E3\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u67E5\u770B\u8BCA\u65AD\u3002";
+    }
+  }
   return (0, import_react.createElement)(
     "section",
     { "aria-label": "\u5927\u80A5\u9C7C\u8BBE\u7F6E", "data-mode": "pilot", style: { padding: 24, border: "1px solid #71809666", borderRadius: 16, maxWidth: 760 } },
     (0, import_react.createElement)("small", null, "DaFeiYu \xB7 \u5355\u89C6\u9891\u5B9E\u9A8C\u7248"),
     (0, import_react.createElement)("h2", null, "\u5927\u80A5\u9C7C"),
-    (0, import_react.createElement)("p", { role: "status" }, status ? `\u6A21\u578B\u8BF7\u6C42 ${status.budget.used} / 5 \xB7 ${status.run?.state ?? "\u5C1A\u672A\u542F\u52A8"} \xB7 15 \u5206\u949F / 1 \u6761\u8BC4\u8BBA / 2 \u6761\u56DE\u590D` : "\u5C1A\u672A\u8FDE\u63A5 Desktop \u8FD0\u884C\u72B6\u6001"),
+    (0, import_react.createElement)("p", { role: "status" }, status ? `\u672C\u8F6E\u6A21\u578B\u8BF7\u6C42 ${status.budget.used} / ${status.budget.total} \xB7 \u7D2F\u8BA1 ${status.budget.lifetimeUsed ?? status.budget.used} \xB7 ${status.run?.state ?? "\u5C1A\u672A\u542F\u52A8"} \xB7 15 \u5206\u949F / 1 \u6761\u8BC4\u8BBA / 2 \u6761\u56DE\u590D` : "\u5C1A\u672A\u8FDE\u63A5 Desktop \u8FD0\u884C\u72B6\u6001"),
     error ? (0, import_react.createElement)("p", { role: "alert", style: { color: "#e15b64", overflowWrap: "anywhere" } }, error) : null,
     status?.configError || status?.credentialError ? (0, import_react.createElement)("p", { role: "alert" }, status.configError || status.credentialError) : null,
     notice ? (0, import_react.createElement)("p", null, notice) : null,
@@ -383,14 +394,21 @@ function SettingsPanel({ ctx }) {
     button("\u53EA\u8BFB\u9884\u68C0", () => act(async () => {
       setPreflight(await call("preflight"));
     }), dirty.current || !status?.account || !!status?.busy),
-    preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : "\u65E0\u5B57\u5E55\uFF0C\u4E0D\u4F1A\u58F0\u79F0\u770B\u5B8C\u89C6\u9891"}`) : null,
+    preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : `\u65E0\u5B57\u5E55\uFF0C\u5DF2\u83B7\u53D6 ${preflight.video.frameCount ?? 0} \u5F20\u5B9E\u9645\u89C6\u9891\u5E27\uFF1B\u97F3\u9891\u672A\u8F6C\u5199`}`) : null,
+    (0, import_react.createElement)("h3", null, "\u89C6\u9891\u5185\u5BB9"),
+    (0, import_react.createElement)("p", null, "\u65E0\u5B57\u5E55\u65F6\u8BFB\u53D6\u5B9E\u9645\u89C6\u9891\u5E76\u91C7\u6837\u6700\u591A 12 \u5E27\uFF0C\u6700\u591A 10 \u5206\u949F/64 MiB\uFF1B\u5F53\u524D\u53EA\u7406\u89E3\u753B\u9762\uFF0C\u97F3\u9891\u672A\u8F6C\u5199\uFF0C\u4E0D\u4F1A\u63A8\u6D4B\u97F3\u4E50\u6216\u5BF9\u767D\u3002\u7406\u89E3\u89C6\u9891\u5360\u7528\u73B0\u6709\u516C\u5F00\u5224\u65AD\u989D\u5EA6 1 \u6B21\uFF0C\u4E0D\u542F\u52A8\u8BC4\u8BBA\u3002\u5E27\u9644\u4EF6\u7531 DSH \u968F\u4F1A\u8BDD\u4FDD\u7559\u3002"),
+    button("\u8BFB\u53D6\u5E76\u7406\u89E3\u89C6\u9891\uFF081 \u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
+      await call("inspectVideo");
+      setNotice("\u89C6\u9891\u5185\u5BB9\u7406\u89E3\u5DF2\u4FDD\u5B58\uFF1B\u672A\u53D1\u9001\u8BC4\u8BBA\u3002");
+    }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspectionConsumed || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    videoText ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, videoText) : null,
     (0, import_react.createElement)("h3", null, "\u4E3B\u4EBA\u4F1A\u8BDD"),
     (0, import_react.createElement)("p", null, "\u9996\u6B21\u9A8C\u6536\u9884\u7559 1 \u6B21\u79C1\u804A\u8BF7\u6C42\uFF1B\u6D3B\u52A8\u7ED3\u675F\u7684\u6C47\u62A5\u53E6\u9884\u7559 1 \u6B21\u3002"),
     (0, import_react.createElement)("textarea", { value: chat, onChange: (e) => setChat(e.target.value), maxLength: 4e3, "aria-label": "\u7ED9\u5927\u80A5\u9C7C\u7684\u6D88\u606F", style: { width: "100%", minHeight: 70 } }),
     button("\u53D1\u9001\u5230\u5927\u80A5\u9C7C\u4F1A\u8BDD", () => act(async () => {
       const result = await call("chat", { text: chat });
       setAnswer(result.text);
-    }), !chat.trim() || !!status?.budget.byPurpose.private || !!status?.busy),
+    }), !chat.trim() || status?.budget.grant === "media-trial-2" || !!status?.budget.byPurpose.private || !!status?.busy),
     answer ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap" } }, answer) : null,
     status?.privateSessionId ? (0, import_react.createElement)("p", null, "\u6301\u4E45\u4F1A\u8BDD\u5DF2\u5EFA\u7ACB\uFF0C\u53EF\u5728\u4FA7\u680F\u6253\u5F00\u300C\u5927\u80A5\u9C7C \xB7 \u4E3B\u4EBA\u4F1A\u8BDD\u300D\u3002") : null,
     (0, import_react.createElement)("h3", null, "\u9650\u5B9A\u89C6\u9891\u8BD5\u8DD1"),
@@ -399,6 +417,11 @@ function SettingsPanel({ ctx }) {
       await call("start", { revision: preflight.revision, accountUid: preflight.account.uid });
       setNotice("\u8BD5\u8DD1\u5DF2\u542F\u52A8\u3002");
     }), !preflight || dirty.current || preflight.revision !== status?.revision || !!status?.trialConsumed || !!status?.busy),
+    status?.trialConsumed ? (0, import_react.createElement)("p", null, "\u5B8C\u6210\u89C6\u9891\u5185\u5BB9\u7406\u89E3\u540E\uFF0C\u53EF\u624B\u52A8\u542F\u52A8\u83B7\u51C6\u7684\u7B2C\u4E8C\u6B21\u8BD5\u8DD1\uFF1A\u76F8\u540C\u8D26\u53F7\u548C\u89C6\u9891\uFF0C15 \u5206\u949F\u30011 \u8BC4\u8BBA/2 \u56DE\u590D\uFF0C\u72EC\u7ACB\u65B0\u589E 4 \u6B21\u8BF7\u6C42\uFF08\u516C\u5F00\u5224\u65AD 3 \u6B21\u3001\u6C47\u62A5 1 \u6B21\uFF09\u3002\u65E7\u8BB0\u5F55\u4FDD\u7559\uFF0C\u672C\u6B21\u4ECD\u53EA\u80FD\u542F\u52A8\u4E00\u6B21\u3002") : null,
+    status?.trialConsumed ? button("\u542F\u52A8\u7B2C\u4E8C\u6B21\u5A92\u4F53\u8BD5\u8DD1\uFF0815 \u5206\u949F\uFF09", () => act(async () => {
+      await call("startMediaTrial", { revision: preflight.revision, accountUid: preflight.account.uid });
+      setNotice("\u7B2C\u4E8C\u6B21\u8BD5\u8DD1\u5DF2\u542F\u52A8\uFF0C\u65E7\u8BB0\u5F55\u5DF2\u4FDD\u7559\u3002");
+    }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !!status?.mediaTrialConsumed || !!status?.busy) : null,
     (0, import_react.createElement)("button", { type: "button", disabled: !ctx || !status?.busy, onClick: () => {
       void call("stop").then(() => refresh()).catch((e) => setError(e instanceof Error ? e.message : "\u505C\u6B62\u5931\u8D25"));
     }, style: { padding: "8px 14px" } }, "\u7ACB\u5373\u505C\u6B62"),

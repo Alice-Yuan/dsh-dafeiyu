@@ -4,7 +4,8 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { LIMITS, PilotError, type PilotConfig, type Purpose, type SendTarget, type Visibility } from './contracts.js';
 
-export interface Run { id: string; accountUid: string; config: PilotConfig; startedAt: number; deadline: number; state: string; reason: string; root: string }
+export type Grant = 'initial' | 'media-trial-2';
+export interface Run { id: string; accountUid: string; config: PilotConfig; startedAt: number; deadline: number; state: string; reason: string; root: string; grant?: Grant }
 export interface Action { id: string; runId: string; eventId: string; kind: 'comment' | 'reply'; target: SendTarget; text: string;
   state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null; reason: string }
 export class PilotStore {
@@ -50,25 +51,38 @@ export class PilotStore {
   set(key: string, value: string): void { this.db.prepare('INSERT INTO pilot_meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
   assertOwner(ownerUid: string): void { const saved = this.get('ownerUid'); if (saved && saved !== ownerUid) throw new PilotError('STORE_CONFIG_MISMATCH'); }
   bindOwner(ownerUid: string): void { if (!ownerUid) throw new PilotError('CONFIG_INCOMPLETE'); this.assertOwner(ownerUid); this.set('ownerUid', ownerUid); }
-  budget(): { used: number; total: number; byPurpose: Record<Purpose, number> } {
+  budget(grant: Grant = this.get('activeGrant') === 'media-trial-2' ? 'media-trial-2' : 'initial'): { used: number; total: number; byPurpose: Record<Purpose, number>; lifetimeUsed: number; grant: Grant } {
     const byPurpose = { private: 0, public: 0, summary: 0 };
-    for (const row of this.db.prepare('SELECT purpose,COUNT(*) AS n FROM pilot_requests GROUP BY purpose').all()) byPurpose[String(row.purpose) as Purpose] = Number(row.n);
-    return { used: byPurpose.private + byPurpose.public + byPurpose.summary, total: LIMITS.requests, byPurpose };
+    const labels = ['private', 'public', 'summary'].map(p => grant === 'initial' ? p : p + ':' + grant);
+    for (const row of this.db.prepare('SELECT purpose,COUNT(*) AS n FROM pilot_requests WHERE purpose IN (?,?,?) GROUP BY purpose').all(...labels)) byPurpose[String(row.purpose).split(':')[0] as Purpose] = Number(row.n);
+    const lifetimeUsed = Number(this.db.prepare('SELECT COUNT(*) AS n FROM pilot_requests').get()!.n);
+    return { used: byPurpose.private + byPurpose.public + byPurpose.summary, total: grant === 'initial' ? LIMITS.requests : 4, byPurpose, lifetimeUsed, grant };
   }
   reserveRequest(purpose: Purpose, now: number): string {
     return this.transaction(() => {
-      const b = this.budget(); const cap = purpose === 'public' ? 3 : 1;
-      if (b.used >= LIMITS.requests || b.byPurpose[purpose] >= cap) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
-      const id = randomUUID(); this.db.prepare('INSERT INTO pilot_requests VALUES(?,?,?)').run(id, purpose, now); return id;
+      const b = this.budget(); const cap = purpose === 'public' ? 3 : purpose === 'private' && b.grant !== 'initial' ? 0 : 1;
+      if (b.used >= b.total || b.byPurpose[purpose] >= cap || b.lifetimeUsed >= 9) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
+      const id = randomUUID(); this.db.prepare('INSERT INTO pilot_requests VALUES(?,?,?)').run(id, b.grant === 'initial' ? purpose : purpose + ':' + b.grant, now); return id;
     });
   }
-  begin(config: PilotConfig, accountUid: string, now: number): Run {
+  begin(config: PilotConfig, accountUid: string, now: number, grant: Grant = 'initial'): Run {
     return this.transaction(() => {
       this.bindOwner(config.ownerUid);
       if (accountUid === config.ownerUid) throw new PilotError('BOT_EQUALS_OWNER');
-      if (this.get('trialConsumed')) throw new PilotError('TRIAL_ALREADY_CONSUMED');
-      const run: Run = { id: randomUUID(), accountUid, config: structuredClone(config), startedAt: now, deadline: now + LIMITS.durationMs, state: 'running', reason: '', root: '' };
-      this.set('trialConsumed', run.id); this.saveRun(run); return run;
+      if (!['initial', 'media-trial-2'].includes(grant)) throw new PilotError('GRANT_DENIED');
+      if ((grant === 'initial' && this.get('trialConsumed')) || (grant === 'media-trial-2' && this.get('mediaTrialConsumed'))) throw new PilotError('TRIAL_ALREADY_CONSUMED');
+      if (grant === 'media-trial-2') {
+        const previous = this.runs().find(r => r.id === this.get('trialConsumed'));
+        if (!previous || previous.state !== 'completed' || previous.accountUid !== accountUid || JSON.stringify(previous.config) !== JSON.stringify(config) || !this.get('videoInspection')) throw new PilotError('MEDIA_TRIAL_NOT_READY');
+        let inspection: any; try { inspection = JSON.parse(this.get('videoInspection')!); } catch { throw new PilotError('MEDIA_TRIAL_NOT_READY'); }
+        if (inspection.accountUid !== accountUid || inspection.material?.bvid !== config.bvid || !inspection.analysis?.summary ||
+            (!inspection.material?.visual?.frames?.length && !inspection.material?.subtitle?.trim())) throw new PilotError('MEDIA_TRIAL_NOT_READY');
+        if (this.actions().some(a => ['sending', 'unknown'].includes(a.state))) throw new PilotError('UNKNOWN_SEND_BLOCKS');
+        if (this.get('latestReport')) this.set('report:' + previous.id, this.get('latestReport')!);
+        this.set('activeGrant', grant);
+      }
+      const run: Run = { id: randomUUID(), accountUid, config: structuredClone(config), startedAt: now, deadline: now + LIMITS.durationMs, state: 'running', reason: '', root: '', grant };
+      this.set(grant === 'initial' ? 'trialConsumed' : 'mediaTrialConsumed', run.id); this.saveRun(run); return run;
     });
   }
   runs(): Run[] { return this.db.prepare('SELECT body FROM pilot_runs ORDER BY rowid DESC').all().map(r => JSON.parse(String(r.body)) as Run); }
