@@ -13,6 +13,8 @@ import { REQUESTS, type Method } from '../shared/remote.js';
 import { FfmpegMediaReader, findDecoder } from '../platform/media.js';
 import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
 import { isOwnerVideoRequest } from '../pilot/owner-request.js';
+import { BrowseRunner } from '../browse/runner.js';
+import { BrowseStore } from '../browse/store.js';
 
 interface Ref<T> { get(): T }
 type LiveConfig = { [K in keyof PilotConfig]: Ref<PilotConfig[K]> };
@@ -33,9 +35,12 @@ export class DaFeiYuControl extends TypertRemoteService {
   private modelValue: HostModel | null = null;
   private runnerValue: PilotRunner | null = null;
   private platformValue: Bilibili | null = null;
+  private browseStoreValue: BrowseStore | null = null;
+  private browseRunnerValue: BrowseRunner | null = null;
   private mediaController: AbortController | null = null;
   private readonly lifetime = new AbortController();
   private serial: Promise<unknown> = Promise.resolve();
+  private exclusiveActive = false;
   private operations = new Set<Promise<unknown>>();
   private decoderCheck: { at: number; available: boolean } | null = null;
   constructor(private readonly owner: HostContext, private readonly live: LiveConfig) {
@@ -56,6 +61,14 @@ export class DaFeiYuControl extends TypertRemoteService {
   }
   private model(): HostModel { return this.modelValue ??= new HostModel(this.owner as unknown as ModelHost, () => this.store(), () => this.currentConfig()); }
   private runner(): PilotRunner { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
+  private browseStore(): BrowseStore { return this.browseStoreValue ??= new BrowseStore(this.store()); }
+  private browser(): BrowseRunner {
+    return this.browseRunnerValue ??= new BrowseRunner(this.browseStore(), {
+      account: signal => this.platform().account(signal),
+      search: (keyword, page, signal) => this.platform().search(keyword, page, signal),
+      read: (bvid, signal) => this.platform().video(bvid, signal, false),
+    });
+  }
   private async ownerContext(signal: AbortSignal) {
     const result = await this.runner().preflight(signal);
     const roots = [...new Set(this.store().actions().filter(a => a.kind === 'comment' && a.state === 'accepted' && a.remoteId && a.target.aid === result.video.aid).map(a => a.remoteId))].slice(-2);
@@ -96,7 +109,12 @@ export class DaFeiYuControl extends TypertRemoteService {
     const parsed = REQUESTS[method].safeParse(request);
     if (!parsed.success) throw new RemoteError('gateway/bad-request', 'Invalid DaFeiYu request.', {});
     const lifetime = AbortSignal.any([signal, this.lifetime.signal]);
-    const run = async () => { lifetime.throwIfAborted(); try { return await action(parsed.data, lifetime); } catch (error) { throw new RemoteError('gateway/bad-request', safeError(error), {}); } };
+    const run = async () => { lifetime.throwIfAborted(); try {
+      if (this.browseRunnerValue?.busy && !['status', 'stop', 'browseHistory'].includes(method)) throw new PilotError('RUN_BUSY');
+      if (exclusive) this.exclusiveActive = true;
+      return await action(parsed.data, lifetime);
+    } catch (error) { throw new RemoteError('gateway/bad-request', safeError(error), {}); }
+    finally { if (exclusive) this.exclusiveActive = false; } };
     const op = exclusive ? this.serial.then(run) : run(); if (exclusive) this.serial = op.catch(() => {});
     this.operations.add(op); try { return await op; } finally { this.operations.delete(op); }
   }
@@ -113,12 +131,26 @@ export class DaFeiYuControl extends TypertRemoteService {
       }
       return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
         configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-        busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+        busy: !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+        browseBusy: this.browseRunnerValue?.busy ?? false, browseRun: this.browseStore().latest(),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
         videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
         ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
-        diagnostic: { version: '0.1.0-alpha.9', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
+        diagnostic: { version: '0.1.0-alpha.10', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
     }, false);
+  }
+  @Remote
+  browse(request: unknown, signal: AbortSignal): Promise<unknown> {
+    // Do not queue starts behind a stopped operation: a new click is always required.
+    return this.call('browse', request, signal, async (value, lifetime) => {
+      if (this.exclusiveActive || this.mediaController || this.runnerValue?.busy || this.modelValue?.busy) throw new PilotError('RUN_BUSY');
+      const config = configOf(this.currentConfig(), true); this.store().bindOwner(config.ownerUid);
+      return this.browser().start(value.keyword, value.accountUid, config.ownerUid, lifetime);
+    }, false);
+  }
+  @Remote
+  browseHistory(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('browseHistory', request, signal, async () => this.browseStore().history(), false);
   }
   @Remote
   saveConfig(request: unknown, signal: AbortSignal): Promise<unknown> {
@@ -276,14 +308,14 @@ export class DaFeiYuControl extends TypertRemoteService {
   }
   @Remote
   stop(request: unknown, signal: AbortSignal): Promise<unknown> {
-    return this.call('stop', request, signal, async () => { this.mediaController?.abort(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
+    return this.call('stop', request, signal, async () => { this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
   }
   @Remote
   reconcile(request: unknown, signal: AbortSignal): Promise<unknown> {
     return this.call('reconcile', request, signal, async (_value, lifetime) => { if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY'); await this.runner().reconcile(lifetime); return { checked: true }; });
   }
   private async shutdown(): Promise<void> {
-    this.lifetime.abort(); await this.runnerValue?.stop(); await this.modelValue?.dispose();
+    this.lifetime.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); await this.modelValue?.dispose();
     await Promise.allSettled([...this.operations]); this.storeValue?.close();
   }
 }

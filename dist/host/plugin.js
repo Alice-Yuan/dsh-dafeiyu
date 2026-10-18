@@ -46,6 +46,8 @@ import { REQUESTS } from '../shared/remote.js';
 import { FfmpegMediaReader, findDecoder } from '../platform/media.js';
 import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
 import { isOwnerVideoRequest } from '../pilot/owner-request.js';
+import { BrowseRunner } from '../browse/runner.js';
+import { BrowseStore } from '../browse/store.js';
 export const name = 'dafeyu';
 export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert', 'llm', 'attachments'];
 export const Config = s.object({
@@ -58,6 +60,8 @@ let DaFeiYuControl = (() => {
     let _classSuper = TypertRemoteService;
     let _instanceExtraInitializers = [];
     let _status_decorators;
+    let _browse_decorators;
+    let _browseHistory_decorators;
     let _saveConfig_decorators;
     let _loginStart_decorators;
     let _loginPoll_decorators;
@@ -79,6 +83,8 @@ let DaFeiYuControl = (() => {
         static {
             const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
             _status_decorators = [Remote];
+            _browse_decorators = [Remote];
+            _browseHistory_decorators = [Remote];
             _saveConfig_decorators = [Remote];
             _loginStart_decorators = [Remote];
             _loginPoll_decorators = [Remote];
@@ -97,6 +103,8 @@ let DaFeiYuControl = (() => {
             _stop_decorators = [Remote];
             _reconcile_decorators = [Remote];
             __esDecorate(this, null, _status_decorators, { kind: "method", name: "status", static: false, private: false, access: { has: obj => "status" in obj, get: obj => obj.status }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _browse_decorators, { kind: "method", name: "browse", static: false, private: false, access: { has: obj => "browse" in obj, get: obj => obj.browse }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _browseHistory_decorators, { kind: "method", name: "browseHistory", static: false, private: false, access: { has: obj => "browseHistory" in obj, get: obj => obj.browseHistory }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _saveConfig_decorators, { kind: "method", name: "saveConfig", static: false, private: false, access: { has: obj => "saveConfig" in obj, get: obj => obj.saveConfig }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _loginStart_decorators, { kind: "method", name: "loginStart", static: false, private: false, access: { has: obj => "loginStart" in obj, get: obj => obj.loginStart }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _loginPoll_decorators, { kind: "method", name: "loginPoll", static: false, private: false, access: { has: obj => "loginPoll" in obj, get: obj => obj.loginPoll }, metadata: _metadata }, null, _instanceExtraInitializers);
@@ -122,9 +130,12 @@ let DaFeiYuControl = (() => {
         modelValue = null;
         runnerValue = null;
         platformValue = null;
+        browseStoreValue = null;
+        browseRunnerValue = null;
         mediaController = null;
         lifetime = new AbortController();
         serial = Promise.resolve();
+        exclusiveActive = false;
         operations = new Set();
         decoderCheck = null;
         constructor(owner, live) {
@@ -147,6 +158,14 @@ let DaFeiYuControl = (() => {
         }
         model() { return this.modelValue ??= new HostModel(this.owner, () => this.store(), () => this.currentConfig()); }
         runner() { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
+        browseStore() { return this.browseStoreValue ??= new BrowseStore(this.store()); }
+        browser() {
+            return this.browseRunnerValue ??= new BrowseRunner(this.browseStore(), {
+                account: signal => this.platform().account(signal),
+                search: (keyword, page, signal) => this.platform().search(keyword, page, signal),
+                read: (bvid, signal) => this.platform().video(bvid, signal, false),
+            });
+        }
         async ownerContext(signal) {
             const result = await this.runner().preflight(signal);
             const roots = [...new Set(this.store().actions().filter(a => a.kind === 'comment' && a.state === 'accepted' && a.remoteId && a.target.aid === result.video.aid).map(a => a.remoteId))].slice(-2);
@@ -200,12 +219,23 @@ let DaFeiYuControl = (() => {
             if (!parsed.success)
                 throw new RemoteError('gateway/bad-request', 'Invalid DaFeiYu request.', {});
             const lifetime = AbortSignal.any([signal, this.lifetime.signal]);
-            const run = async () => { lifetime.throwIfAborted(); try {
-                return await action(parsed.data, lifetime);
-            }
-            catch (error) {
-                throw new RemoteError('gateway/bad-request', safeError(error), {});
-            } };
+            const run = async () => {
+                lifetime.throwIfAborted();
+                try {
+                    if (this.browseRunnerValue?.busy && !['status', 'stop', 'browseHistory'].includes(method))
+                        throw new PilotError('RUN_BUSY');
+                    if (exclusive)
+                        this.exclusiveActive = true;
+                    return await action(parsed.data, lifetime);
+                }
+                catch (error) {
+                    throw new RemoteError('gateway/bad-request', safeError(error), {});
+                }
+                finally {
+                    if (exclusive)
+                        this.exclusiveActive = false;
+                }
+            };
             const op = exclusive ? this.serial.then(run) : run();
             if (exclusive)
                 this.serial = op.catch(() => { });
@@ -247,12 +277,26 @@ let DaFeiYuControl = (() => {
                 }
                 return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
                     configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-                    busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+                    busy: !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+                    browseBusy: this.browseRunnerValue?.busy ?? false, browseRun: this.browseStore().latest(),
                     privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
                     videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
                     ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
-                    diagnostic: { version: '0.1.0-alpha.9', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
+                    diagnostic: { version: '0.1.0-alpha.10', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
             }, false);
+        }
+        browse(request, signal) {
+            // Do not queue starts behind a stopped operation: a new click is always required.
+            return this.call('browse', request, signal, async (value, lifetime) => {
+                if (this.exclusiveActive || this.mediaController || this.runnerValue?.busy || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                const config = configOf(this.currentConfig(), true);
+                this.store().bindOwner(config.ownerUid);
+                return this.browser().start(value.keyword, value.accountUid, config.ownerUid, lifetime);
+            }, false);
+        }
+        browseHistory(request, signal) {
+            return this.call('browseHistory', request, signal, async () => this.browseStore().history(), false);
         }
         saveConfig(request, signal) {
             return this.call('saveConfig', request, signal, async (value) => {
@@ -440,7 +484,7 @@ let DaFeiYuControl = (() => {
             });
         }
         stop(request, signal) {
-            return this.call('stop', request, signal, async () => { this.mediaController?.abort(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
+            return this.call('stop', request, signal, async () => { this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
         }
         reconcile(request, signal) {
             return this.call('reconcile', request, signal, async (_value, lifetime) => { if (this.runnerValue?.busy)
@@ -448,6 +492,7 @@ let DaFeiYuControl = (() => {
         }
         async shutdown() {
             this.lifetime.abort();
+            this.browseRunnerValue?.stop();
             await this.runnerValue?.stop();
             await this.modelValue?.dispose();
             await Promise.allSettled([...this.operations]);

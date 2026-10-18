@@ -10,6 +10,8 @@ export const REQUESTS = {
   loginPoll: z.object({ loginId: z.string().uuid() }).strict(),
   logout: z.object({}).strict(),
   preflight: z.object({}).strict(),
+  browse: z.object({ keyword: z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  browseHistory: z.object({}).strict(),
   checkOwnerRequest: z.object({}).strict(),
   models: z.object({}).strict(),
   saveModel: z.object({ provider: z.string().min(1).max(200), model: z.string().min(1).max(300) }).strict(),

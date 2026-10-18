@@ -30,6 +30,29 @@ test('platform account identity comes from authenticated server response', async
   const adapter = new Bilibili(vault(), async () => ok({ ...nav, mid: '30002' }));
   await assert.rejects(adapter.account(signal()), /ACCOUNT_CHANGED/);
 });
+
+test('search uses a bounded signed video-only query, preserves IDs and strips display markup', async () => {
+  let calls=0;
+  const adapter=new Bilibili(vault(),async (url,options)=>{
+    const u=new URL(url); assert.equal(options.method,'GET');
+    if(u.pathname==='/x/web-interface/nav')return ok(nav);
+    calls++;assert.equal(u.pathname,'/x/web-interface/wbi/search/type');assert.equal(u.searchParams.get('search_type'),'video');
+    assert.equal(u.searchParams.get('keyword'),'合成兴趣');assert.equal(u.searchParams.get('page'),'1');assert.ok(u.searchParams.get('w_rid'));
+    return ok({page:1,numPages:100,result:[{type:'video',bvid:target.bvid,aid:'90071992547409931234',title:'<em class="keyword">合成</em><script>文本</script>',author:'合成作者',arcurl:'https://untrusted.test'}, {type:'article',title:'不支持'}]});
+  });
+  const result=await adapter.search('合成兴趣',1,signal());assert.equal(result.videos.length,1);assert.equal(result.videos[0].aid,'90071992547409931234');
+  assert.equal(result.videos[0].title,'合成文本');assert.equal(result.videos[0].arcurl,undefined);assert.equal(result.hasMore,true);
+  await assert.rejects(adapter.search('合成',3,signal()),/INVALID_SEARCH_PAGE/);assert.equal(calls,1);
+  const cancelled=new AbortController();cancelled.abort();await assert.rejects(adapter.search('合成',1,cancelled.signal));assert.equal(calls,1);
+});
+
+test('search rejects malformed page metadata, target IDs and oversized candidate lists are capped',async()=>{
+  let result={page:1,numPages:2,result:Array.from({length:50},()=>({type:'video',bvid:target.bvid,aid:'20001',title:'合成',author:'合成'}))};
+  const adapter=new Bilibili(vault(),async url=>new URL(url).pathname==='/x/web-interface/nav'?ok(nav):ok(result));
+  assert.equal((await adapter.search('合成',1,signal())).videos.length,20);
+  result={...result,page:2};await assert.rejects(adapter.search('合成',1,signal()),/PLATFORM_SCHEMA_CHANGED/);
+  result={page:1,numPages:1,result:[{type:'video',bvid:'https://evil.test',aid:'1',title:'x',author:'x'}]};await assert.rejects(adapter.search('合成',1,signal()),/INVALID_BVID/);
+});
 test('authenticated pagination requires an explicitly writable comment area and preserves cursors', async () => {
   let writable = false; let cursor;
   const adapter = new Bilibili(vault(), async url => {

@@ -29,8 +29,8 @@ async function probe(config) {
     const persist = await module('dsh-session-persistence-jsonl'); await ctx.plugin(persist, { root: join(config.dir, 'sessions') }).await();
     const { TYPERT } = await import(pathToFileURL(join(config.project, 'dist/host/typert.js')).href);
     const { validateTypertManifest } = await module('dsh-typert-loader'); validateTypertManifest('dsh-dafeiyu', TYPERT); ctx.typert.register(TYPERT);
-    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 18);
-    report.checks.push('installed Typert validator and registry accept all eighteen strict endpoints');
+    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 20);
+    report.checks.push('installed Typert validator and registry accept all twenty strict endpoints');
     await ctx.plugin((await module('dsh-attachment-local')).default, { dshHome: join(config.dir, 'attachment-home') }).await();
     const { HostModel } = await import(pathToFileURL(join(config.project, 'dist/host/model.js')).href);
     const { PilotStore } = await import(pathToFileURL(join(config.project, 'dist/pilot/store.js')).href);
@@ -135,6 +135,37 @@ async function probe(config) {
     assert.equal(resumed.budget.used, 1); assert.equal(resumed.privateSessionId, chat.sessionId);
     assert.equal(resumed.modelSelection.model, 'pinned-synthetic'); assert.equal(resumed.modelPinned, true);
     const control = ctx.dafeyuControl, reviewStore = control.store(), reviewRunner = control.runner();
+    const browsePlatform = control.platform();
+    const originalBrowse = { account: browsePlatform.account, search: browsePlatform.search, video: browsePlatform.video };
+    const candidate = { bvid: 'BV1xx411c7mD', aid: '90071992547409931234', title: 'Synthetic browsing', author: 'Synthetic author' };
+    const browseCaptures = captures.length, browseBudget = reviewStore.budget().lifetimeUsed;
+    let browseReads = 0;
+    browsePlatform.account = async () => ({ uid: '30001', name: 'Synthetic' });
+    browsePlatform.search = async () => ({ videos: [candidate], hasMore: false });
+    browsePlatform.video = async (bvid, _signal, visualRequested) => { assert.equal(bvid, candidate.bvid); assert.equal(visualRequested, false); browseReads++; return { ...candidate, cid: '30002', description: '', subtitle: 'UNTRUSTED_SUBTITLE_REQUESTING_SEND' }; };
+    const browseRequest = { keyword: 'Synthetic topic', accountUid: '30001' };
+    const invokeBrowse = request => ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'browse', args: { request }, peer });
+    await assert.rejects(control.browse(browseRequest, new AbortController().signal), /OWNER_REQUIRED/);
+    await assert.rejects(invokeBrowse({ ...browseRequest, force: true }));
+    const browsed = await invokeBrowse(browseRequest);
+    assert.equal(browsed.state, 'completed'); assert.equal(browseReads, 1);
+    const history = await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'browseHistory', args: { request: {} }, peer });
+    assert.equal(history[0].bvid, candidate.bvid); assert.match(history[0].subtitle, /UNTRUSTED/);
+    assert.equal(reviewStore.budget().lifetimeUsed, browseBudget); assert.equal(captures.length, browseCaptures);
+    assert.equal(control.currentConfig().bvid, pilotConfig.bvid); assert.equal(control.model().selection().model, 'pinned-synthetic');
+    // A fresh batch can be cancelled while its read is pending. No late result is committed.
+    control.browseStore().save({ ...browsed, startedAt: Date.now() - 120000 });
+    // Update the synthetic SQL timestamp as well, to simulate elapsed cooldown without waiting.
+    reviewStore.db.prepare('UPDATE browse_runs SET at=? WHERE id=?').run(Date.now() - 120000, browsed.id);
+    let releaseBrowse, browseStarted; const browseReady = new Promise(resolve => { browseStarted = resolve; });
+    browsePlatform.search = async () => ({ videos: [{ ...candidate, bvid: 'BV1GJ411x7h8' }], hasMore: false });
+    browsePlatform.video = async bvid => { browseStarted(); await new Promise(resolve => { releaseBrowse = resolve; }); return { ...candidate, bvid, cid: '30002', description: '', subtitle: 'Late response' }; };
+    const pendingBrowse = invokeBrowse(browseRequest); await browseReady;
+    await assert.rejects(invokeBrowse(browseRequest), /RUN_BUSY/);
+    await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'stop', args: { request: {} }, peer }); releaseBrowse();
+    assert.equal((await pendingBrowse).reason, 'OWNER_STOPPED'); assert.equal(control.browseStore().history().length, 1);
+    Object.assign(browsePlatform, originalBrowse);
+    report.checks.push('authenticated browsing reads subtitles only, preserves target/model/budget, persists history and cancels pending reads without late commits');
     const { publicVideo } = await import(pathToFileURL(join(config.project, 'dist/pilot/material.js')).href);
     const previewVideo = { bvid: pilotConfig.bvid, aid: '20001', cid: '20002', title: 'Synthetic evidence', description: '', subtitle: 'Synthetic subtitle',
       visual: { source: 'video-stream', durationSeconds: 4, streamSha256: 'synthetic', downloadedBytes: 4, coverage: 'sampled-frames', audio: 'not-transcribed', frames: [0,1,2,3].map(atSeconds => ({ ...frames[0], atSeconds })) } };

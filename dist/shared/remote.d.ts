@@ -16,6 +16,11 @@ export declare const REQUESTS: {
     }, z.core.$strict>;
     readonly logout: z.ZodObject<{}, z.core.$strict>;
     readonly preflight: z.ZodObject<{}, z.core.$strict>;
+    readonly browse: z.ZodObject<{
+        keyword: z.ZodString;
+        accountUid: z.ZodString;
+    }, z.core.$strict>;
+    readonly browseHistory: z.ZodObject<{}, z.core.$strict>;
     readonly checkOwnerRequest: z.ZodObject<{}, z.core.$strict>;
     readonly models: z.ZodObject<{}, z.core.$strict>;
     readonly saveModel: z.ZodObject<{

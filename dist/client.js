@@ -190,6 +190,8 @@ var REQUESTS = {
   loginPoll: import_zod.z.object({ loginId: import_zod.z.string().uuid() }).strict(),
   logout: import_zod.z.object({}).strict(),
   preflight: import_zod.z.object({}).strict(),
+  browse: import_zod.z.object({ keyword: import_zod.z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
+  browseHistory: import_zod.z.object({}).strict(),
   checkOwnerRequest: import_zod.z.object({}).strict(),
   models: import_zod.z.object({}).strict(),
   saveModel: import_zod.z.object({ provider: import_zod.z.string().min(1).max(200), model: import_zod.z.string().min(1).max(300) }).strict(),
@@ -253,6 +255,9 @@ function SettingsPanel({ ctx }) {
   const [reviewNote, setReviewNote] = (0, import_react.useState)("");
   const [modelRows, setModelRows] = (0, import_react.useState)([]);
   const [modelKey, setModelKey] = (0, import_react.useState)("");
+  const [keyword, setKeyword] = (0, import_react.useState)("");
+  const [readings, setReadings] = (0, import_react.useState)([]);
+  const [browsing, setBrowsing] = (0, import_react.useState)(false);
   const mounted = (0, import_react.useRef)(true);
   const call = async (method, request = {}, signal) => {
     if (!ctx) throw new Error("\u5C1A\u672A\u8FDE\u63A5 Desktop \u5BBF\u4E3B");
@@ -351,6 +356,7 @@ function SettingsPanel({ ctx }) {
     (0, import_react.createElement)(key === "persona" ? "textarea" : "input", { value: draft[key], onChange: (e) => edit(key, e.target.value), style: { display: "block", width: "100%", padding: 8, boxSizing: "border-box" } })
   );
   const visible = (value) => value === true ? "\u5DF2\u89C2\u5BDF\u5230" : "\u672A\u786E\u8BA4";
+  const readState = (value) => ({ subtitle: "\u5DF2\u53D6\u5F97\u5B57\u5E55\uFF0C\u5C1A\u672A\u7531\u6A21\u578B\u5224\u65AD", "no-subtitle": "\u65E0\u5B57\u5E55\uFF0C\u8DF3\u8FC7", seen: "\u8FD1\u671F\u5DF2\u8BFB\uFF0C\u8DF3\u8FC7", deferred: "\u8FBE\u5230\u672C\u6279\u8BFB\u53D6\u4E0A\u9650", failed: "\u8BFB\u53D6\u5931\u8D25" })[value] ?? value;
   let videoText = "", reviewLabel = "\u5F85\u590D\u6838", reviewed = false;
   if (status?.videoReview) {
     try {
@@ -432,6 +438,40 @@ function SettingsPanel({ ctx }) {
       setPreflight(await call("preflight"));
     }), dirty.current || !status?.account || !!status?.busy),
     preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : "\u65E0\u5B57\u5E55\uFF0C\u9ED8\u8BA4\u8DF3\u8FC7\u5185\u5BB9\u5224\u65AD\uFF1B\u672A\u4E0B\u8F7D\u5A92\u4F53\u6216\u62BD\u5E27"}`) : null,
+    (0, import_react.createElement)("h3", null, "\u6309\u5174\u8DA3\u6D4F\u89C8"),
+    (0, import_react.createElement)("p", null, "\u8F93\u5165\u60F3\u4E86\u89E3\u7684\u8BDD\u9898\uFF0C\u624B\u52A8\u6D4F\u89C8\u4E00\u6279\u3002\u6700\u591A\u641C\u7D222\u9875\u3001\u8BFB\u53D63\u4E2A\u65B0\u89C6\u9891\u7684\u5B57\u5E55\uFF0C2\u5206\u949F\u540E\u505C\u6B62\uFF1B\u4E0D\u8C03\u7528\u6A21\u578B\u3001\u4E0D\u4E0B\u8F7D\u89C6\u9891\u3001\u4E0D\u53D1\u5E03\u5185\u5BB9\uFF0C\u4E5F\u4E0D\u6539\u53D8\u4E0A\u9762\u7684\u8BC4\u8BBA\u8BD5\u8DD1\u76EE\u6807\u3002"),
+    (0, import_react.createElement)("input", { "aria-label": "\u6D4F\u89C8\u5174\u8DA3\u5173\u952E\u8BCD", value: keyword, maxLength: 80, placeholder: "\u4F8B\u5982\uFF1A\u72EC\u7ACB\u6E38\u620F\u5F00\u53D1", disabled: disabled || !!status?.busy, onChange: (e) => setKeyword(e.target.value), style: { width: "100%", padding: 8, boxSizing: "border-box" } }),
+    button("\u641C\u7D22\u5E76\u8BFB\u53D6\u4E00\u6279\u5B57\u5E55", () => act(async () => {
+      setBrowsing(true);
+      try {
+        const result = await call("browse", { keyword, accountUid: status.account.uid });
+        setReadings(await call("browseHistory"));
+        setNotice(`\u6D4F\u89C8${result.state === "completed" ? "\u5B8C\u6210" : "\u5DF2\u505C\u6B62"}\uFF1A${result.reason}\uFF1B\u6CA1\u6709\u8C03\u7528\u6A21\u578B\u6216\u53D1\u5E03\u5185\u5BB9\u3002`);
+      } finally {
+        if (mounted.current) setBrowsing(false);
+      }
+    }), !keyword.trim() || !status?.account || !!status?.busy || dirty.current),
+    (0, import_react.createElement)("button", { type: "button", disabled: !ctx || !(browsing || status?.browseBusy), onClick: () => {
+      void call("stop").then(() => refresh()).catch((e) => setError(e instanceof Error ? e.message : "\u505C\u6B62\u5931\u8D25"));
+    }, style: { padding: "8px 14px" } }, "\u505C\u6B62\u672C\u6279\u6D4F\u89C8"),
+    button("\u8BFB\u53D6\u6700\u8FD1\u6D4F\u89C8\u8BB0\u5F55", () => act(async () => {
+      setReadings(await call("browseHistory"));
+    })),
+    (0, import_react.createElement)("p", null, "\u6700\u8FD1200\u4E2A\u89C6\u9891\u7528\u4E8E\u5224\u91CD\uFF0C\u6700\u8FD120\u4E2A\u6279\u6B21\u4FDD\u7559\u7ED3\u679C\uFF1B\u65E7\u8BB0\u5F55\u81EA\u52A8\u6DD8\u6C70\uFF0C\u6DD8\u6C70\u540E\u53EF\u80FD\u91CD\u65B0\u8BFB\u53D6\u3002\u9875\u9762\u5C55\u793A\u6700\u8FD110\u4E2A\u89C6\u9891\uFF0C\u5B57\u5E55\u6700\u591A\u4FDD\u755920000\u5B57\uFF1B\u6CA1\u6709\u56FE\u7247\u7F13\u5B58\u3002\u6279\u6B21\u95F4\u81F3\u5C11\u95F4\u969460\u79D2\uFF0C\u91CD\u542F\u4E0D\u7EED\u8DD1\u3002"),
+    status?.browseRun ? (0, import_react.createElement)(
+      "div",
+      { role: "status" },
+      (0, import_react.createElement)("p", null, `\u6700\u8FD1\u4E00\u6279\u300C${status.browseRun.keyword}\u300D\uFF1A${status.browseRun.state} \xB7 ${status.browseRun.reason} \xB7 \u641C\u7D22${status.browseRun.pages}\u9875 / \u5C1D\u8BD5\u8BFB\u53D6${status.browseRun.read}\u4E2A`),
+      ...status.browseRun.items.map((item) => (0, import_react.createElement)("p", { key: item.bvid }, (0, import_react.createElement)("a", { href: `https://www.bilibili.com/video/${item.bvid}/`, target: "_blank", rel: "noreferrer" }, item.title), " \xB7 " + readState(item.state)))
+    ) : null,
+    ...readings.map((item) => (0, import_react.createElement)(
+      "details",
+      { key: `${item.accountUid}:${item.bvid}` },
+      (0, import_react.createElement)("summary", null, item.title + " \xB7 " + readState(item.state)),
+      (0, import_react.createElement)("p", null, `UP\u4E3B\uFF1A${item.author} \xB7 ${new Date(item.at).toLocaleString()}${item.truncated ? " \xB7 \u5B57\u5E55\u8FBE\u5230\u4FDD\u7559\u4E0A\u9650\uFF0C\u53EF\u80FD\u622A\u65AD" : ""}`),
+      (0, import_react.createElement)("a", { href: `https://www.bilibili.com/video/${item.bvid}/`, target: "_blank", rel: "noreferrer" }, "\u6253\u5F00\u6765\u6E90\u89C6\u9891"),
+      (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 300, overflow: "auto" } }, item.subtitle ?? "\u6CA1\u6709\u5B57\u5E55\uFF0C\u672A\u4E0B\u8F7D\u5A92\u4F53\u6216\u63A8\u6D4B\u89C6\u9891\u5185\u5BB9\u3002")
+    )),
     (0, import_react.createElement)("h3", null, "\u89C6\u9891\u5185\u5BB9"),
     (0, import_react.createElement)("p", null, status?.diagnostic.decoderAvailable ? "\u753B\u9762\u89E3\u7801\u5668\u53EF\u7528\uFF08FFmpeg / ffprobe\uFF09\u3002" : "\u672A\u68C0\u6D4B\u5230 FFmpeg / ffprobe\uFF1A\u53EF\u6B63\u5E38\u8BFB\u53D6\u5B57\u5E55\uFF0C\u753B\u9762\u5206\u6790\u6682\u4E0D\u53EF\u7528\u3002\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u5B89\u88C5\u5916\u90E8\u7A0B\u5E8F\u3002"),
     (0, import_react.createElement)("p", null, "\u539F\u89C6\u9891\u4E34\u65F6\u6587\u4EF6\u5904\u7406\u540E\u5220\u9664\uFF1B\u9884\u89C8\u4E0D\u53E6\u5B58\u56FE\u7247\u3002\u4EA4\u7ED9\u6A21\u578B\u7684\u56FE\u50CF\u7531 DSH \u4FDD\u5B58\u4E3A\u4F1A\u8BDD\u9644\u4EF6\uFF0C\u5F53\u524D\u6CA1\u6709\u81EA\u52A8\u6E05\u7406\u7B56\u7565\u3002\u4E00\u6B21\u53EA\u8BFB\u6821\u51C6\u6700\u591A\u63D0\u4EA43\u5E27\u3002"),

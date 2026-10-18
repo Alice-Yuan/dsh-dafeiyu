@@ -1,6 +1,7 @@
 import { createElement as h, useEffect, useRef, useState, type ReactElement } from 'react';
 import { REMOTE, type Method } from '../shared/remote.js';
 import { DEFAULT_CONFIG, type PilotConfig } from '../pilot/contracts.js';
+import type { BrowseRun, Reading } from '../browse/contracts.js';
 
 export const name = 'dafeyu-settings';
 export const inject = ['slots', 'remote'];
@@ -15,7 +16,7 @@ export interface ClientContext {
       component: (props: DetailProps) => ReactElement | null): unknown;
   };
 }
-interface Snapshot { ownerVideoRequest?: string | null; ownerVideoBaselineAt?: string | null; modelPinned?: boolean; modelSelection?: { provider: string; model: string }; videoCalibrationConsumed?: boolean; videoReview?: string | null; videoInspectionRevision?: string; config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string; decoderAvailable?: boolean } }
+interface Snapshot { browseBusy?: boolean; browseRun?: BrowseRun | null; ownerVideoRequest?: string | null; ownerVideoBaselineAt?: string | null; modelPinned?: boolean; modelSelection?: { provider: string; model: string }; videoCalibrationConsumed?: boolean; videoReview?: string | null; videoInspectionRevision?: string; config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string; decoderAvailable?: boolean } }
 export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [status, setStatus] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<PilotConfig>({ ...DEFAULT_CONFIG });
@@ -28,6 +29,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [reviewNote, setReviewNote] = useState('');
   const [modelRows, setModelRows] = useState<{ provider: string; name: string; models: { id: string; name: string; description?: string; inputModalities?: string[] }[] }[]>([]);
   const [modelKey, setModelKey] = useState('');
+  const [keyword, setKeyword] = useState(''); const [readings, setReadings] = useState<Reading[]>([]);
+  const [browsing, setBrowsing] = useState(false);
   const mounted = useRef(true);
   const call = async (method: Method, request: unknown = {}, signal?: AbortSignal): Promise<any> => {
     if (!ctx) throw new Error('尚未连接 Desktop 宿主');
@@ -72,6 +75,7 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const field = (label: string, key: keyof PilotConfig) => h('label', { style: { display: 'block', margin: '12px 0' } }, label,
     h(key === 'persona' ? 'textarea' : 'input', { value: draft[key], onChange: (e: { target: { value: string } }) => edit(key, e.target.value), style: { display: 'block', width: '100%', padding: 8, boxSizing: 'border-box' } }));
   const visible = (value: boolean | null) => value === true ? '已观察到' : '未确认';
+  const readState = (value: string) => ({ subtitle: '已取得字幕，尚未由模型判断', 'no-subtitle': '无字幕，跳过', seen: '近期已读，跳过', deferred: '达到本批读取上限', failed: '读取失败' }[value] ?? value);
   let videoText = '', reviewLabel = '待复核', reviewed = false;
   if (status?.videoReview) { try { const r = JSON.parse(status.videoReview); if (r.revision === status.videoInspectionRevision) { reviewed = r.decision === 'approved'; reviewLabel = reviewed ? '已复核通过' : '已驳回：' + r.note; } } catch { /* Treat malformed state as unreviewed. */ } }
   if (status?.videoInspection) { try { const v = JSON.parse(status.videoInspection); videoText = [v.analysis.summary, ...v.analysis.observations.map((o: { atSeconds: number; description: string }) => `${o.atSeconds.toFixed(1)} 秒：${o.description}`), '理解范围：画面采样，音频未转写。', ...v.analysis.limitations].join('\n'); } catch { videoText = '内容理解记录无法读取，请查看诊断。'; } }
@@ -99,6 +103,25 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     qr ? h('img', { src: qr.image, alt: '用大肥鱼账号扫描 B站登录二维码', width: 240, height: 240 }) : null,
     button('只读预检', () => act(async () => { setPreflight(await call('preflight')); }), dirty.current || !status?.account || !!status?.busy),
     preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : '无字幕，默认跳过内容判断；未下载媒体或抽帧'}`) : null,
+    h('h3', null, '按兴趣浏览'),
+    h('p', null, '输入想了解的话题，手动浏览一批。最多搜索2页、读取3个新视频的字幕，2分钟后停止；不调用模型、不下载视频、不发布内容，也不改变上面的评论试跑目标。'),
+    h('input', { 'aria-label': '浏览兴趣关键词', value: keyword, maxLength: 80, placeholder: '例如：独立游戏开发', disabled: disabled || !!status?.busy, onChange: (e: { target: { value: string } }) => setKeyword(e.target.value), style: { width: '100%', padding: 8, boxSizing: 'border-box' } }),
+    button('搜索并读取一批字幕', () => act(async () => {
+      setBrowsing(true);
+      try { const result = await call('browse', { keyword, accountUid: status!.account!.uid }); setReadings(await call('browseHistory')); setNotice(`浏览${result.state === 'completed' ? '完成' : '已停止'}：${result.reason}；没有调用模型或发布内容。`); }
+      finally { if (mounted.current) setBrowsing(false); }
+    }), !keyword.trim() || !status?.account || !!status?.busy || dirty.current),
+    h('button', { type: 'button', disabled: !ctx || !(browsing || status?.browseBusy), onClick: () => { void call('stop').then(() => refresh()).catch(e => setError(e instanceof Error ? e.message : '停止失败')); }, style: { padding: '8px 14px' } }, '停止本批浏览'),
+    button('读取最近浏览记录', () => act(async () => { setReadings(await call('browseHistory')); })),
+    h('p', null, '最近200个视频用于判重，最近20个批次保留结果；旧记录自动淘汰，淘汰后可能重新读取。页面展示最近10个视频，字幕最多保留20000字；没有图片缓存。批次间至少间隔60秒，重启不续跑。'),
+    status?.browseRun ? h('div', { role: 'status' },
+      h('p', null, `最近一批「${status.browseRun.keyword}」：${status.browseRun.state} · ${status.browseRun.reason} · 搜索${status.browseRun.pages}页 / 尝试读取${status.browseRun.read}个`),
+      ...status.browseRun.items.map(item => h('p', { key: item.bvid }, h('a', { href: `https://www.bilibili.com/video/${item.bvid}/`, target: '_blank', rel: 'noreferrer' }, item.title), ' · ' + readState(item.state)))) : null,
+    ...readings.map(item => h('details', { key: `${item.accountUid}:${item.bvid}` },
+      h('summary', null, item.title + ' · ' + readState(item.state)),
+      h('p', null, `UP主：${item.author} · ${new Date(item.at).toLocaleString()}${item.truncated ? ' · 字幕达到保留上限，可能截断' : ''}`),
+      h('a', { href: `https://www.bilibili.com/video/${item.bvid}/`, target: '_blank', rel: 'noreferrer' }, '打开来源视频'),
+      h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 300, overflow: 'auto' } }, item.subtitle ?? '没有字幕，未下载媒体或推测视频内容。'))),
     h('h3', null, '视频内容'),
     h('p', null, status?.diagnostic.decoderAvailable ? '画面解码器可用（FFmpeg / ffprobe）。' : '未检测到 FFmpeg / ffprobe：可正常读取字幕，画面分析暂不可用。插件不会自动安装外部程序。'),
     h('p', null, '原视频临时文件处理后删除；预览不另存图片。交给模型的图像由 DSH 保存为会话附件，当前没有自动清理策略。一次只读校准最多提交3帧。'),

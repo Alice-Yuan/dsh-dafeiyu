@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import { decimalId, LIMITS, PilotError } from '../pilot/contracts.js';
 import { credentialOf } from './vault.js';
+import { keywordOf, BROWSE_LIMITS } from '../browse/contracts.js';
 function obj(value) { if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new PilotError('PLATFORM_SCHEMA_CHANGED'); return value; }
 function str(value, max = 4000) { if (typeof value !== 'string')
@@ -116,6 +117,27 @@ export class Bilibili {
         const key = (v) => new URL(str(v)).pathname.split('/').pop().split('.')[0];
         const query = signWbi(params, key(wbi.img_url), key(wbi.sub_url), Math.floor(this.now() / 1000));
         return (await this.raw(API + path + '?' + query, signal, await this.credential())).data;
+    }
+    async search(keyword, page, signal) {
+        keyword = keywordOf(keyword);
+        if (!Number.isSafeInteger(page) || page < 1 || page > BROWSE_LIMITS.pages)
+            throw new PilotError('INVALID_SEARCH_PAGE');
+        signal.throwIfAborted();
+        const data = await this.signed('/x/web-interface/wbi/search/type', { search_type: 'video', keyword, page: String(page), page_size: '20', order: 'totalrank' }, signal);
+        signal.throwIfAborted();
+        if (data.page !== page || !Number.isSafeInteger(data.numPages) || Number(data.numPages) < 0)
+            throw new PilotError('PLATFORM_SCHEMA_CHANGED');
+        const videos = list(data.result ?? []).filter(v => obj(v).type === 'video').slice(0, BROWSE_LIMITS.pageSize).map(raw => {
+            const v = obj(raw), bvid = str(v.bvid, 30);
+            if (!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid))
+                throw new PilotError('INVALID_BVID');
+            const aid = decimalId(v.aid);
+            if (aid === '0')
+                throw new PilotError('INVALID_PLATFORM_ID');
+            // Search highlighting is display text, never markup or a navigable API URL.
+            return { bvid, aid, title: str(v.title, 1000).replace(/<[^>]*>/g, '').slice(0, 300), author: str(v.author, 100) };
+        });
+        return { videos, hasMore: page < Number(data.numPages) };
     }
     async video(bvid, signal, visualRequested = false) {
         if (!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid))
