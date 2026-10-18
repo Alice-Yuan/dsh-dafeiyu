@@ -58,6 +58,8 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     logout(request: unknown, signal: AbortSignal): Promise<unknown>;
     preflight(request: unknown, signal: AbortSignal): Promise<unknown>;
     inspectVideo(request: unknown, signal: AbortSignal): Promise<unknown>;
+    videoEvidence(request: unknown, signal: AbortSignal): Promise<unknown>;
+    reviewVideo(request: unknown, signal: AbortSignal): Promise<unknown>;
     chat(request: unknown, signal: AbortSignal): Promise<unknown>;
     start(request: unknown, signal: AbortSignal): Promise<unknown>;
     startMediaTrial(request: unknown, signal: AbortSignal): Promise<unknown>;

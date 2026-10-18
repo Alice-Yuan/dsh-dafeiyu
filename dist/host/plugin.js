@@ -63,6 +63,8 @@ let DaFeiYuControl = (() => {
     let _logout_decorators;
     let _preflight_decorators;
     let _inspectVideo_decorators;
+    let _videoEvidence_decorators;
+    let _reviewVideo_decorators;
     let _chat_decorators;
     let _start_decorators;
     let _startMediaTrial_decorators;
@@ -78,6 +80,8 @@ let DaFeiYuControl = (() => {
             _logout_decorators = [Remote];
             _preflight_decorators = [Remote];
             _inspectVideo_decorators = [Remote];
+            _videoEvidence_decorators = [Remote];
+            _reviewVideo_decorators = [Remote];
             _chat_decorators = [Remote];
             _start_decorators = [Remote];
             _startMediaTrial_decorators = [Remote];
@@ -90,6 +94,8 @@ let DaFeiYuControl = (() => {
             __esDecorate(this, null, _logout_decorators, { kind: "method", name: "logout", static: false, private: false, access: { has: obj => "logout" in obj, get: obj => obj.logout }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _preflight_decorators, { kind: "method", name: "preflight", static: false, private: false, access: { has: obj => "preflight" in obj, get: obj => obj.preflight }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _inspectVideo_decorators, { kind: "method", name: "inspectVideo", static: false, private: false, access: { has: obj => "inspectVideo" in obj, get: obj => obj.inspectVideo }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _videoEvidence_decorators, { kind: "method", name: "videoEvidence", static: false, private: false, access: { has: obj => "videoEvidence" in obj, get: obj => obj.videoEvidence }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _reviewVideo_decorators, { kind: "method", name: "reviewVideo", static: false, private: false, access: { has: obj => "reviewVideo" in obj, get: obj => obj.reviewVideo }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _chat_decorators, { kind: "method", name: "chat", static: false, private: false, access: { has: obj => "chat" in obj, get: obj => obj.chat }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _start_decorators, { kind: "method", name: "start", static: false, private: false, access: { has: obj => "start" in obj, get: obj => obj.start }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _startMediaTrial_decorators, { kind: "method", name: "startMediaTrial", static: false, private: false, access: { has: obj => "startMediaTrial" in obj, get: obj => obj.startMediaTrial }, metadata: _metadata }, null, _instanceExtraInitializers);
@@ -188,8 +194,8 @@ let DaFeiYuControl = (() => {
                     configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
                     busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
                     privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
-                    videoInspection: store.get('videoInspection'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
-                    diagnostic: { version: '0.1.0-alpha.7', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+                    videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
+                    diagnostic: { version: '0.1.0-alpha.8', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
             }, false);
         }
         saveConfig(request, signal) {
@@ -272,6 +278,27 @@ let DaFeiYuControl = (() => {
                 store.set('videoInspection', JSON.stringify(report));
                 return report;
             }));
+        }
+        videoEvidence(request, signal) {
+            return this.call('videoEvidence', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async (lifetime) => {
+                const store = this.store();
+                if (!store.inspectionRevision())
+                    throw new PilotError('VIDEO_INSPECTION_REQUIRED');
+                const result = await this.runner().preflight(lifetime);
+                store.matchInspection(result.account.uid, result.video);
+                lifetime.throwIfAborted();
+                const revision = store.inspectionRevision();
+                store.set('videoEvidenceViewed', revision);
+                return { revision, subtitle: result.video.subtitle, frames: (result.video.visual?.frames ?? []).map(f => ({ atSeconds: f.atSeconds, image: 'data:image/jpeg;base64,' + Buffer.from(f.jpeg).toString('base64') })) };
+            }));
+        }
+        reviewVideo(request, signal) {
+            return this.call('reviewVideo', request, signal, async (value) => {
+                if (this.runnerValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                this.store().recordVideoReview(value.revision, value.decision, value.note);
+                return { saved: true };
+            });
         }
         chat(request, signal) {
             return this.call('chat', request, signal, async (value, lifetime) => {

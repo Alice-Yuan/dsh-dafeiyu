@@ -29,8 +29,8 @@ async function probe(config) {
     const persist = await module('dsh-session-persistence-jsonl'); await ctx.plugin(persist, { root: join(config.dir, 'sessions') }).await();
     const { TYPERT } = await import(pathToFileURL(join(config.project, 'dist/host/typert.js')).href);
     const { validateTypertManifest } = await module('dsh-typert-loader'); validateTypertManifest('dsh-dafeiyu', TYPERT); ctx.typert.register(TYPERT);
-    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 12);
-    report.checks.push('installed Typert validator and registry accept all twelve strict endpoints');
+    assert.equal(ctx.typert.local.list().filter(d => d.namespace === 'dafeyu').length, 14);
+    report.checks.push('installed Typert validator and registry accept all fourteen strict endpoints');
     await ctx.plugin((await module('dsh-attachment-local')).default, { dshHome: join(config.dir, 'attachment-home') }).await();
     const { HostModel } = await import(pathToFileURL(join(config.project, 'dist/host/model.js')).href);
     const { PilotStore } = await import(pathToFileURL(join(config.project, 'dist/pilot/store.js')).href);
@@ -127,6 +127,20 @@ async function probe(config) {
     await entry.update({ disabled: false }); await ctx.loader.await();
     const resumed = await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'status', args: { request: {} }, peer });
     assert.equal(resumed.budget.used, 1); assert.equal(resumed.privateSessionId, chat.sessionId);
+    const control = ctx.dafeyuControl, reviewStore = control.store(), reviewRunner = control.runner();
+    const previewVideo = { bvid: pilotConfig.bvid, aid: '20001', cid: '20002', title: 'Synthetic evidence', description: '', subtitle: 'Synthetic subtitle' };
+    reviewStore.set('videoInspection', JSON.stringify({ accountUid: '30001', material: previewVideo, analysis: { summary: 'Synthetic analysis' } }));
+    const reviewRevision = reviewStore.inspectionRevision();
+    const invokeReview = decision => ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'reviewVideo', args: { request: { revision: reviewRevision, decision, note: 'Synthetic review' } }, peer });
+    await assert.rejects(invokeReview('approved'), /VIDEO_REVIEW_STALE/);
+    const realPreflight = reviewRunner.preflight;
+    reviewRunner.preflight = async () => ({ account: { uid: '30001' }, video: previewVideo, comments: [] });
+    const preview = await ctx.typertGateway.invoke({ namespace: 'dafeyu', method: 'videoEvidence', args: { request: {} }, peer });
+    assert.equal(preview.revision, reviewRevision); assert.equal(preview.subtitle, 'Synthetic subtitle');
+    await invokeReview('rejected'); assert.throws(() => reviewStore.assertVideoReviewed(), /VIDEO_REVIEW_REQUIRED/);
+    await invokeReview('approved'); reviewStore.assertVideoReviewed();
+    assert.equal(reviewStore.budget().used, 1); reviewRunner.preflight = realPreflight;
+    report.checks.push('authenticated evidence/review endpoints require exact preview revision, preserve rejection and consume no model request');
     // Exercise the actual Client Remote namespace guard, not just a plain-object UI stub.
     clientCtx = new Context();
     await clientCtx.plugin((await module('dsh-typert-registry')).default).await();

@@ -15,7 +15,7 @@ export interface ClientContext {
       component: (props: DetailProps) => ReactElement | null): unknown;
   };
 }
-interface Snapshot { config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string } }
+interface Snapshot { videoReview?: string | null; videoInspectionRevision?: string; config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string } }
 export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [status, setStatus] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<PilotConfig>({ ...DEFAULT_CONFIG });
@@ -24,6 +24,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [qr, setQr] = useState<{ loginId: string; image: string; expiresAt: number } | null>(null);
   const [preflight, setPreflight] = useState<{ account: { uid: string; name: string }; video: { title: string; bvid: string; hasSubtitle: boolean; frameCount?: number; durationSeconds?: number }; commentsRead: number; revision: string } | null>(null);
   const [chat, setChat] = useState('你好，大肥鱼。'); const [answer, setAnswer] = useState('');
+  const [evidence, setEvidence] = useState<{ revision: string; subtitle: string | null; frames: { atSeconds: number; image: string }[] } | null>(null);
+  const [reviewNote, setReviewNote] = useState('');
   const mounted = useRef(true);
   const call = async (method: Method, request: unknown = {}, signal?: AbortSignal): Promise<any> => {
     if (!ctx) throw new Error('尚未连接 Desktop 宿主');
@@ -68,7 +70,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const field = (label: string, key: keyof PilotConfig) => h('label', { style: { display: 'block', margin: '12px 0' } }, label,
     h(key === 'persona' ? 'textarea' : 'input', { value: draft[key], onChange: (e: { target: { value: string } }) => edit(key, e.target.value), style: { display: 'block', width: '100%', padding: 8, boxSizing: 'border-box' } }));
   const visible = (value: boolean | null) => value === true ? '已观察到' : '未确认';
-  let videoText = '';
+  let videoText = '', reviewLabel = '待复核', reviewed = false;
+  if (status?.videoReview) { try { const r = JSON.parse(status.videoReview); if (r.revision === status.videoInspectionRevision) { reviewed = r.decision === 'approved'; reviewLabel = reviewed ? '已复核通过' : '已驳回：' + r.note; } } catch { /* Treat malformed state as unreviewed. */ } }
   if (status?.videoInspection) { try { const v = JSON.parse(status.videoInspection); videoText = [v.analysis.summary, ...v.analysis.observations.map((o: { atSeconds: number; description: string }) => `${o.atSeconds.toFixed(1)} 秒：${o.description}`), '理解范围：画面采样，音频未转写。', ...v.analysis.limitations].join('\n'); } catch { videoText = '内容理解记录无法读取，请查看诊断。'; } }
   return h('section', { 'aria-label': '大肥鱼设置', 'data-mode': 'pilot', style: { padding: 24, border: '1px solid #71809666', borderRadius: 16, maxWidth: 760 } },
     h('small', null, 'DaFeiYu · 单视频实验版'), h('h2', null, '大肥鱼'),
@@ -89,7 +92,16 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     h('h3', null, '视频内容'),
     h('p', null, '无字幕时读取实际视频并采样最多 12 帧，最多 10 分钟/64 MiB；当前只理解画面，音频未转写，不会推测音乐或对白。理解视频占用现有公开判断额度 1 次，不启动评论。帧附件由 DSH 随会话保留。'),
     button(status?.videoInspectionConsumed && !status?.videoInspection ? '重试视频理解（消耗剩余额度 1 次）' : '读取并理解视频（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === 'media-trial-2' || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
-    videoText ? h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, videoText) : null,
+    videoText ? h('div', null, h('h4', null, '模型分析 · ' + reviewLabel),
+      h('p', null, '收到图像和返回答案不代表理解正确。请对照原帧检查具体描述；画面姿态、连续动作和因果可能被误读。'),
+      h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, videoText),
+      button('加载原帧对照（不调用模型）', () => act(async () => { setEvidence(await call('videoEvidence')); }), !!status?.busy),
+      evidence && evidence.revision === status?.videoInspectionRevision ? h('div', null,
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12 } }, ...evidence.frames.map((f, i) => h('figure', { key: i, style: { margin: 0, maxWidth: 340 } }, h('img', { src: f.image, alt: `视频原帧 ${f.atSeconds.toFixed(3)} 秒`, width: 320, style: { maxWidth: '100%', height: 'auto' } }), h('figcaption', null, `${f.atSeconds.toFixed(3)} 秒`)))),
+        evidence.subtitle ? h('p', { style: { whiteSpace: 'pre-wrap' } }, evidence.subtitle) : null,
+        h('textarea', { 'aria-label': '视频复核备注', value: reviewNote, maxLength: 1000, placeholder: '记下误读或复核依据（仅存本地，不进入模型）', onChange: (e: { target: { value: string } }) => setReviewNote(e.target.value), style: { width: '100%', minHeight: 60 } }),
+        button('描述与原帧一致，标记通过', () => act(async () => { await call('reviewVideo', { revision: evidence.revision, decision: 'approved', note: reviewNote }); setNotice('视频描述已复核；未启动试跑。'); }), !!status?.busy),
+        button('发现误读，驳回此分析', () => act(async () => { await call('reviewVideo', { revision: evidence.revision, decision: 'rejected', note: reviewNote }); setNotice('分析已驳回，不能据此启动新试跑。'); }), !!status?.busy)) : null) : null,
     h('h3', null, '主人会话'), h('p', null, '首次验收预留 1 次私聊请求；活动结束的汇报另预留 1 次。'),
     h('textarea', { value: chat, onChange: (e: { target: { value: string } }) => setChat(e.target.value), maxLength: 4000, 'aria-label': '给大肥鱼的消息', style: { width: '100%', minHeight: 70 } }),
     button('发送到大肥鱼会话', () => act(async () => { const result = await call('chat', { text: chat }); setAnswer(result.text); }), !chat.trim() || status?.budget.grant === 'media-trial-2' || !!status?.budget.byPurpose.private || !!status?.busy),
@@ -99,8 +111,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     h('p', null, '启动即允许在上述视频公开发言，最多 1 条评论和 2 条直接回复；单条最多 150 字。到期、取消或重启不续跑，额度不自动重置。'),
     button('启动一次 15 分钟试跑', () => act(async () => { await call('start', { revision: preflight!.revision, accountUid: preflight!.account.uid }); setNotice('试跑已启动。'); }), !preflight || dirty.current || preflight.revision !== status?.revision || !!status?.trialConsumed || !!status?.busy),
     status?.trialConsumed ? h('p', null, '完成视频内容理解后，可手动启动获准的第二次试跑：相同账号和视频，15 分钟、1 评论/2 回复，独立新增 4 次请求（公开判断 3 次、汇报 1 次）。旧记录保留，本次仍只能启动一次。') : null,
-    status?.trialConsumed ? button('启动第二次媒体试跑（15 分钟）', () => act(async () => { await call('startMediaTrial', { revision: preflight!.revision, accountUid: preflight!.account.uid }); setNotice('第二次试跑已启动，旧记录已保留。'); }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !!status?.mediaTrialConsumed || !!status?.busy) : null,
-    h('button', { type: 'button', disabled: !ctx || !status?.busy, onClick: () => { void call('stop').then(() => refresh()).catch(e => setError(e instanceof Error ? e.message : '停止失败')); }, style: { padding: '8px 14px' } }, '立即停止'),
+    status?.trialConsumed ? button('启动第二次媒体试跑（15 分钟）', () => act(async () => { await call('startMediaTrial', { revision: preflight!.revision, accountUid: preflight!.account.uid }); setNotice('第二次试跑已启动，旧记录已保留。'); }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !reviewed || !!status?.mediaTrialConsumed || !!status?.busy) : null,
+    h('button', { type: 'button', disabled: !ctx || !status?.busy, onClick: () => { void call('stop').then(() => { setNotice('已停止；不会续跑或补充额度。'); return refresh(); }).catch(e => setError(e instanceof Error ? e.message : '停止失败')); }, style: { padding: '8px 14px' } }, '立即停止'),
     button('仅核对发送回执', () => act(async () => { await call('reconcile'); }), !!status?.busy),
     ...(status?.actions ?? []).map(a => h('article', { key: a.id, style: { borderTop: '1px solid #71809666', paddingTop: 12, marginTop: 12 } },
       h('p', null, a.text), h('p', null, `${a.state} · 本人可见：${visible(a.selfVisible)} · 公开可见：${visible(a.publicVisible)}`),

@@ -191,6 +191,8 @@ var REQUESTS = {
   logout: import_zod.z.object({}).strict(),
   preflight: import_zod.z.object({}).strict(),
   inspectVideo: import_zod.z.object({}).strict(),
+  videoEvidence: import_zod.z.object({}).strict(),
+  reviewVideo: import_zod.z.object({ revision: import_zod.z.string().regex(/^[a-f0-9]{64}$/), decision: import_zod.z.enum(["approved", "rejected"]), note: import_zod.z.string().max(1e3) }).strict(),
   chat: import_zod.z.object({ text: import_zod.z.string().min(1).max(4e3) }).strict(),
   start: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
   startMediaTrial: import_zod.z.object({ revision: import_zod.z.string().max(64), accountUid: import_zod.z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
@@ -243,6 +245,8 @@ function SettingsPanel({ ctx }) {
   const [preflight, setPreflight] = (0, import_react.useState)(null);
   const [chat, setChat] = (0, import_react.useState)("\u4F60\u597D\uFF0C\u5927\u80A5\u9C7C\u3002");
   const [answer, setAnswer] = (0, import_react.useState)("");
+  const [evidence, setEvidence] = (0, import_react.useState)(null);
+  const [reviewNote, setReviewNote] = (0, import_react.useState)("");
   const mounted = (0, import_react.useRef)(true);
   const call = async (method, request = {}, signal) => {
     if (!ctx) throw new Error("\u5C1A\u672A\u8FDE\u63A5 Desktop \u5BBF\u4E3B");
@@ -341,7 +345,17 @@ function SettingsPanel({ ctx }) {
     (0, import_react.createElement)(key === "persona" ? "textarea" : "input", { value: draft[key], onChange: (e) => edit(key, e.target.value), style: { display: "block", width: "100%", padding: 8, boxSizing: "border-box" } })
   );
   const visible = (value) => value === true ? "\u5DF2\u89C2\u5BDF\u5230" : "\u672A\u786E\u8BA4";
-  let videoText = "";
+  let videoText = "", reviewLabel = "\u5F85\u590D\u6838", reviewed = false;
+  if (status?.videoReview) {
+    try {
+      const r = JSON.parse(status.videoReview);
+      if (r.revision === status.videoInspectionRevision) {
+        reviewed = r.decision === "approved";
+        reviewLabel = reviewed ? "\u5DF2\u590D\u6838\u901A\u8FC7" : "\u5DF2\u9A73\u56DE\uFF1A" + r.note;
+      }
+    } catch {
+    }
+  }
   if (status?.videoInspection) {
     try {
       const v = JSON.parse(status.videoInspection);
@@ -401,7 +415,31 @@ function SettingsPanel({ ctx }) {
       await call("inspectVideo");
       setNotice("\u89C6\u9891\u5185\u5BB9\u7406\u89E3\u5DF2\u4FDD\u5B58\uFF1B\u672A\u53D1\u9001\u8BC4\u8BBA\u3002");
     }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === "media-trial-2" || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
-    videoText ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, videoText) : null,
+    videoText ? (0, import_react.createElement)(
+      "div",
+      null,
+      (0, import_react.createElement)("h4", null, "\u6A21\u578B\u5206\u6790 \xB7 " + reviewLabel),
+      (0, import_react.createElement)("p", null, "\u6536\u5230\u56FE\u50CF\u548C\u8FD4\u56DE\u7B54\u6848\u4E0D\u4EE3\u8868\u7406\u89E3\u6B63\u786E\u3002\u8BF7\u5BF9\u7167\u539F\u5E27\u68C0\u67E5\u5177\u4F53\u63CF\u8FF0\uFF1B\u753B\u9762\u59FF\u6001\u3001\u8FDE\u7EED\u52A8\u4F5C\u548C\u56E0\u679C\u53EF\u80FD\u88AB\u8BEF\u8BFB\u3002"),
+      (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, videoText),
+      button("\u52A0\u8F7D\u539F\u5E27\u5BF9\u7167\uFF08\u4E0D\u8C03\u7528\u6A21\u578B\uFF09", () => act(async () => {
+        setEvidence(await call("videoEvidence"));
+      }), !!status?.busy),
+      evidence && evidence.revision === status?.videoInspectionRevision ? (0, import_react.createElement)(
+        "div",
+        null,
+        (0, import_react.createElement)("div", { style: { display: "flex", flexWrap: "wrap", gap: 12 } }, ...evidence.frames.map((f, i) => (0, import_react.createElement)("figure", { key: i, style: { margin: 0, maxWidth: 340 } }, (0, import_react.createElement)("img", { src: f.image, alt: `\u89C6\u9891\u539F\u5E27 ${f.atSeconds.toFixed(3)} \u79D2`, width: 320, style: { maxWidth: "100%", height: "auto" } }), (0, import_react.createElement)("figcaption", null, `${f.atSeconds.toFixed(3)} \u79D2`)))),
+        evidence.subtitle ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap" } }, evidence.subtitle) : null,
+        (0, import_react.createElement)("textarea", { "aria-label": "\u89C6\u9891\u590D\u6838\u5907\u6CE8", value: reviewNote, maxLength: 1e3, placeholder: "\u8BB0\u4E0B\u8BEF\u8BFB\u6216\u590D\u6838\u4F9D\u636E\uFF08\u4EC5\u5B58\u672C\u5730\uFF0C\u4E0D\u8FDB\u5165\u6A21\u578B\uFF09", onChange: (e) => setReviewNote(e.target.value), style: { width: "100%", minHeight: 60 } }),
+        button("\u63CF\u8FF0\u4E0E\u539F\u5E27\u4E00\u81F4\uFF0C\u6807\u8BB0\u901A\u8FC7", () => act(async () => {
+          await call("reviewVideo", { revision: evidence.revision, decision: "approved", note: reviewNote });
+          setNotice("\u89C6\u9891\u63CF\u8FF0\u5DF2\u590D\u6838\uFF1B\u672A\u542F\u52A8\u8BD5\u8DD1\u3002");
+        }), !!status?.busy),
+        button("\u53D1\u73B0\u8BEF\u8BFB\uFF0C\u9A73\u56DE\u6B64\u5206\u6790", () => act(async () => {
+          await call("reviewVideo", { revision: evidence.revision, decision: "rejected", note: reviewNote });
+          setNotice("\u5206\u6790\u5DF2\u9A73\u56DE\uFF0C\u4E0D\u80FD\u636E\u6B64\u542F\u52A8\u65B0\u8BD5\u8DD1\u3002");
+        }), !!status?.busy)
+      ) : null
+    ) : null,
     (0, import_react.createElement)("h3", null, "\u4E3B\u4EBA\u4F1A\u8BDD"),
     (0, import_react.createElement)("p", null, "\u9996\u6B21\u9A8C\u6536\u9884\u7559 1 \u6B21\u79C1\u804A\u8BF7\u6C42\uFF1B\u6D3B\u52A8\u7ED3\u675F\u7684\u6C47\u62A5\u53E6\u9884\u7559 1 \u6B21\u3002"),
     (0, import_react.createElement)("textarea", { value: chat, onChange: (e) => setChat(e.target.value), maxLength: 4e3, "aria-label": "\u7ED9\u5927\u80A5\u9C7C\u7684\u6D88\u606F", style: { width: "100%", minHeight: 70 } }),
@@ -421,9 +459,12 @@ function SettingsPanel({ ctx }) {
     status?.trialConsumed ? button("\u542F\u52A8\u7B2C\u4E8C\u6B21\u5A92\u4F53\u8BD5\u8DD1\uFF0815 \u5206\u949F\uFF09", () => act(async () => {
       await call("startMediaTrial", { revision: preflight.revision, accountUid: preflight.account.uid });
       setNotice("\u7B2C\u4E8C\u6B21\u8BD5\u8DD1\u5DF2\u542F\u52A8\uFF0C\u65E7\u8BB0\u5F55\u5DF2\u4FDD\u7559\u3002");
-    }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !!status?.mediaTrialConsumed || !!status?.busy) : null,
+    }), !preflight || dirty.current || preflight.revision !== status?.revision || !status?.videoInspection || !reviewed || !!status?.mediaTrialConsumed || !!status?.busy) : null,
     (0, import_react.createElement)("button", { type: "button", disabled: !ctx || !status?.busy, onClick: () => {
-      void call("stop").then(() => refresh()).catch((e) => setError(e instanceof Error ? e.message : "\u505C\u6B62\u5931\u8D25"));
+      void call("stop").then(() => {
+        setNotice("\u5DF2\u505C\u6B62\uFF1B\u4E0D\u4F1A\u7EED\u8DD1\u6216\u8865\u5145\u989D\u5EA6\u3002");
+        return refresh();
+      }).catch((e) => setError(e instanceof Error ? e.message : "\u505C\u6B62\u5931\u8D25"));
     }, style: { padding: "8px 14px" } }, "\u7ACB\u5373\u505C\u6B62"),
     button("\u4EC5\u6838\u5BF9\u53D1\u9001\u56DE\u6267", () => act(async () => {
       await call("reconcile");

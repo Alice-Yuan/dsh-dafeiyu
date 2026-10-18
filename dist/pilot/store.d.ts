@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { type PilotConfig, type Purpose, type SendTarget, type Visibility } from './contracts.js';
+import type { VideoMaterial } from './contracts.js';
 export type Grant = 'initial' | 'media-trial-2';
 export interface Run {
     id: string;
@@ -35,6 +36,10 @@ export declare class PilotStore {
     set(key: string, value: string): void;
     assertOwner(ownerUid: string): void;
     bindOwner(ownerUid: string): void;
+    inspectionRevision(): string;
+    matchInspection(accountUid: string, video: VideoMaterial): void;
+    recordVideoReview(revision: string, decision: 'approved' | 'rejected', note: string): void;
+    assertVideoReviewed(): void;
     budget(grant?: Grant): {
         used: number;
         total: number;

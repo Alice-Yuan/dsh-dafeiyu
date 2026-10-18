@@ -37,6 +37,8 @@ export class PilotRunner {
             throw new PilotError('RUN_BUSY');
         if (this.store.get(grant === 'initial' ? 'trialConsumed' : 'mediaTrialConsumed'))
             throw new PilotError('TRIAL_ALREADY_CONSUMED');
+        if (grant === 'media-trial-2')
+            this.store.assertVideoReviewed();
         this.starting = true;
         const controller = new AbortController();
         this.controller = controller;
@@ -47,6 +49,10 @@ export class PilotRunner {
             startSignal.throwIfAborted();
             if (initial.account.uid !== expectedAccount || JSON.stringify(config) !== JSON.stringify(this.config()))
                 throw new PilotError('CONFIG_OR_ACCOUNT_CHANGED');
+            if (grant === 'media-trial-2' || initial.video.visual?.frames.length) {
+                this.store.assertVideoReviewed();
+                this.store.matchInspection(initial.account.uid, initial.video);
+            }
             const run = this.store.begin(config, initial.account.uid, this.now(), grant);
             this.store.remember(run.id, initial.comments.map(c => c.id));
             // The request may finish; only the explicitly started trial owns this lifetime.

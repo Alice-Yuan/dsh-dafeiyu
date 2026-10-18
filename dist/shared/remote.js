@@ -9,6 +9,8 @@ export const REQUESTS = {
     logout: z.object({}).strict(),
     preflight: z.object({}).strict(),
     inspectVideo: z.object({}).strict(),
+    videoEvidence: z.object({}).strict(),
+    reviewVideo: z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/), decision: z.enum(['approved', 'rejected']), note: z.string().max(1000) }).strict(),
     chat: z.object({ text: z.string().min(1).max(4000) }).strict(),
     start: z.object({ revision: z.string().max(64), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),
     startMediaTrial: z.object({ revision: z.string().max(64), accountUid: z.string().regex(/^[1-9]\d{0,24}$/) }).strict(),

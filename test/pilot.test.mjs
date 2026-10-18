@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { PilotStore } from '../dist/pilot/store.js';
 import { PilotRunner } from '../dist/pilot/runner.js';
 import { configOf, DEFAULT_CONFIG, intentOf, PilotError } from '../dist/pilot/contracts.js';
+import { publicVideo } from '../dist/pilot/material.js';
 
 const config = { ...DEFAULT_CONFIG, ownerUid: '10001', bvid: 'BV1GJ411x7h7', diagnosticMarker: 'PRIVATE_MARKER_DO_NOT_PUBLISH' };
 mkdirSync(resolve('tmp/tests'), { recursive: true });
@@ -54,6 +55,8 @@ test('second media grant retains initial history and cannot replenish or resume 
  assert.throws(()=>store.begin(config,'30001',200,'media-trial-2'),/MEDIA_TRIAL_NOT_READY/);
  store.set('videoInspection',JSON.stringify({accountUid:'30001',material:{bvid:config.bvid,subtitle:'synthetic'},analysis:{summary:'synthetic'}}));
  assert.throws(()=>store.begin(config,'30002',200,'media-trial-2'),/MEDIA_TRIAL_NOT_READY/);
+ assert.throws(()=>store.begin(config,'30001',200,'media-trial-2'),/VIDEO_REVIEW_REQUIRED/);
+ const revision=store.inspectionRevision();store.set('videoEvidenceViewed',revision);store.recordVideoReview(revision,'approved','synthetic review');
  const second=store.begin(config,'30001',200,'media-trial-2');
  assert.equal(store.budget().total,4);assert.equal(store.budget().used,0);assert.equal(store.budget().lifetimeUsed,3);assert.equal(store.budget('initial').used,3);
  assert.equal(store.get('report:'+first.id),'original-receipt');assert.equal(store.get('trialConsumed'),first.id);assert.equal(store.runs().length,2);
@@ -69,9 +72,31 @@ test('second media grant retains initial history and cannot replenish or resume 
 test('visual trial passes separate image frames and excludes previous run skip reasons',async t=>{
  const f=setup(t);f.platform.video=async()=>({bvid:config.bvid,aid:'20001',cid:'20002',title:'Synthetic',description:'',subtitle:null,
  visual:{source:'video-stream',durationSeconds:54,streamSha256:'synthetic',downloadedBytes:4,audio:'not-transcribed',coverage:'sampled-frames',frames:[{atSeconds:1,jpeg:new Uint8Array([255,216,255,217]),sha256:'synthetic'}]}});
+ await assert.rejects(f.runner.start('30001',new AbortController().signal),/VIDEO_REVIEW_REQUIRED/);
+ assert.equal(f.store.budget().used,0);assert.equal(f.sent.length,0);
+ const video=await f.platform.video();f.store.set('videoInspection',JSON.stringify({accountUid:'30001',material:publicVideo(video),analysis:{summary:'synthetic'}}));
+ const revision=f.store.inspectionRevision();f.store.set('videoEvidenceViewed',revision);f.store.recordVideoReview(revision,'approved','synthetic review');
  f.store.set('lastSkipReason','old-run-reason');await f.runner.start('30001',new AbortController().signal);await f.runner.idle();
  assert.equal(f.inputs[0].frames.length,1);assert.ok(!f.inputs[0].prompt.includes('jpeg'));assert.ok(f.inputs[0].prompt.includes('not-transcribed'));
  assert.equal(JSON.parse(f.store.get('latestReport')).skipped,null);
+});
+
+test('video review binds displayed evidence and exact analysis; rejection and changed media fail closed',t=>{
+ const {store,path}=fixture(t,false);t.after(()=>{try{store.close();}catch{}});
+ const video={bvid:config.bvid,aid:'20001',cid:'20002',title:'Synthetic',description:'',subtitle:'Synthetic subtitle'};
+ const inspection={accountUid:'30001',material:publicVideo(video),analysis:{summary:'Synthetic analysis'}};
+ store.set('videoInspection',JSON.stringify(inspection));const revision=store.inspectionRevision();
+ assert.throws(()=>store.recordVideoReview(revision,'approved',''),/VIDEO_REVIEW_STALE/);
+ store.matchInspection('30001',video);store.set('videoEvidenceViewed',revision);
+ store.recordVideoReview(revision,'rejected','Incorrect pose');assert.throws(()=>store.assertVideoReviewed(),/VIDEO_REVIEW_REQUIRED/);
+ store.recordVideoReview(revision,'approved','Checked against evidence');store.assertVideoReviewed();
+ assert.throws(()=>store.matchInspection('30002',video),/VIDEO_EVIDENCE_CHANGED/);
+ for(const change of [{cid:'20003'},{subtitle:'Changed'},{bvid:'BV1xx411c7mD'}])assert.throws(()=>store.matchInspection('30001',{...video,...change}),/VIDEO_EVIDENCE_CHANGED/);
+ store.set('videoInspection',JSON.stringify({...inspection,analysis:{summary:'New answer'}}));
+ assert.throws(()=>store.assertVideoReviewed(),/VIDEO_REVIEW_REQUIRED/);
+ assert.throws(()=>store.recordVideoReview(revision,'approved',''),/VIDEO_REVIEW_STALE/);
+ assert.equal(store.budget().used,0);store.close();
+ const reopened=new PilotStore(path);t.after(()=>reopened.close());assert.throws(()=>reopened.assertVideoReviewed(),/VIDEO_REVIEW_REQUIRED/);
 });
 test('pilot hard limits: one comment and two direct replies; no private marker in public input', async t => {
   const f = setup(t); await f.runner.start('30001', new AbortController().signal); await f.runner.idle();

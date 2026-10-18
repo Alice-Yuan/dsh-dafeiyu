@@ -1,8 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { LIMITS, PilotError } from './contracts.js';
+import { publicVideo } from './material.js';
 export class PilotStore {
     db;
     token = randomUUID();
@@ -71,6 +72,34 @@ export class PilotStore {
         throw new PilotError('STORE_CONFIG_MISMATCH'); }
     bindOwner(ownerUid) { if (!ownerUid)
         throw new PilotError('CONFIG_INCOMPLETE'); this.assertOwner(ownerUid); this.set('ownerUid', ownerUid); }
+    inspectionRevision() { const value = this.get('videoInspection'); return value ? createHash('sha256').update(value).digest('hex') : ''; }
+    matchInspection(accountUid, video) {
+        let saved;
+        try {
+            saved = JSON.parse(this.get('videoInspection') ?? 'null');
+        }
+        catch { /* Reject invalid evidence. */ }
+        if (!saved || saved.accountUid !== accountUid || JSON.stringify(saved.material) !== JSON.stringify(publicVideo(video)))
+            throw new PilotError('VIDEO_EVIDENCE_CHANGED');
+    }
+    recordVideoReview(revision, decision, note) {
+        this.transaction(() => {
+            if (this.runs().some(r => r.state === 'running'))
+                throw new PilotError('RUN_BUSY');
+            if (!revision || revision !== this.inspectionRevision() || this.get('videoEvidenceViewed') !== revision)
+                throw new PilotError('VIDEO_REVIEW_STALE');
+            this.set('videoReview', JSON.stringify({ revision, decision, note, at: Date.now() }));
+        });
+    }
+    assertVideoReviewed() {
+        let review;
+        try {
+            review = JSON.parse(this.get('videoReview') ?? 'null');
+        }
+        catch { /* Reject invalid review. */ }
+        if (!review || review.decision !== 'approved' || !review.revision || review.revision !== this.inspectionRevision())
+            throw new PilotError('VIDEO_REVIEW_REQUIRED');
+    }
     budget(grant = this.get('activeGrant') === 'media-trial-2' ? 'media-trial-2' : 'initial') {
         const byPurpose = { private: 0, public: 0, summary: 0 };
         const labels = ['private', 'public', 'summary'].map(p => grant === 'initial' ? p : p + ':' + grant);
@@ -113,6 +142,7 @@ export class PilotStore {
                 if (inspection.accountUid !== accountUid || inspection.material?.bvid !== config.bvid || !inspection.analysis?.summary ||
                     (!inspection.material?.visual?.frames?.length && !inspection.material?.subtitle?.trim()))
                     throw new PilotError('MEDIA_TRIAL_NOT_READY');
+                this.assertVideoReviewed();
                 if (this.actions().some(a => ['sending', 'unknown'].includes(a.state)))
                     throw new PilotError('UNKNOWN_SEND_BLOCKS');
                 if (this.get('latestReport'))

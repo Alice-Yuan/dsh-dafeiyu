@@ -82,8 +82,8 @@ export class DaFeiYuControl extends TypertRemoteService {
         configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
         busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
-        videoInspection: store.get('videoInspection'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
-        diagnostic: { version: '0.1.0-alpha.7', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+        videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
+        diagnostic: { version: '0.1.0-alpha.8', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
     }, false);
   }
   @Remote
@@ -130,8 +130,8 @@ export class DaFeiYuControl extends TypertRemoteService {
   inspectVideo(request: unknown, signal: AbortSignal): Promise<unknown> {
     return this.call('inspectVideo', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async lifetime => {
       if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
-        const store = this.store(); if (store.get('videoInspection')) throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
-        if (store.budget().grant !== 'initial') throw new PilotError('MODEL_BUDGET_EXHAUSTED');
+      const store = this.store(); if (store.get('videoInspection')) throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
+      if (store.budget().grant !== 'initial') throw new PilotError('MODEL_BUDGET_EXHAUSTED');
       const config = configOf(this.currentConfig(), true), result = await this.runner().preflight(lifetime);
       if (!result.video.visual?.frames.length && !result.video.subtitle?.trim()) throw new PilotError('VIDEO_CONTENT_UNAVAILABLE');
       const budget = store.budget(); if (budget.used >= LIMITS.requests || budget.byPurpose.public >= 3) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
@@ -147,6 +147,24 @@ export class DaFeiYuControl extends TypertRemoteService {
       const report = { video: `https://www.bilibili.com/video/${config.bvid}/`, accountUid: result.account.uid, material: publicVideo(result.video), analysis: { summary: value.summary, observations: value.observations.map((o: any) => ({ atSeconds: o.atSeconds, description: o.description })), limitations: value.limitations }, audio: 'not-transcribed', sessionId: answer.sessionId };
       store.set('videoInspection', JSON.stringify(report)); return report;
     }));
+  }
+  @Remote
+  videoEvidence(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('videoEvidence', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async lifetime => {
+      const store = this.store(); if (!store.inspectionRevision()) throw new PilotError('VIDEO_INSPECTION_REQUIRED');
+      const result = await this.runner().preflight(lifetime);
+      store.matchInspection(result.account.uid, result.video); lifetime.throwIfAborted();
+      const revision = store.inspectionRevision(); store.set('videoEvidenceViewed', revision);
+      return { revision, subtitle: result.video.subtitle, frames: (result.video.visual?.frames ?? []).map(f => ({ atSeconds: f.atSeconds, image: 'data:image/jpeg;base64,' + Buffer.from(f.jpeg).toString('base64') })) };
+    }));
+  }
+  @Remote
+  reviewVideo(request: unknown, signal: AbortSignal): Promise<unknown> {
+    return this.call('reviewVideo', request, signal, async value => {
+      if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
+      this.store().recordVideoReview(value.revision, value.decision, value.note);
+      return { saved: true };
+    });
   }
   @Remote
   chat(request: unknown, signal: AbortSignal): Promise<unknown> {
