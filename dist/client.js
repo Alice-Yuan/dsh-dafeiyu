@@ -397,10 +397,10 @@ function SettingsPanel({ ctx }) {
     preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : `\u65E0\u5B57\u5E55\uFF0C\u5DF2\u83B7\u53D6 ${preflight.video.frameCount ?? 0} \u5F20\u5B9E\u9645\u89C6\u9891\u5E27\uFF1B\u97F3\u9891\u672A\u8F6C\u5199`}`) : null,
     (0, import_react.createElement)("h3", null, "\u89C6\u9891\u5185\u5BB9"),
     (0, import_react.createElement)("p", null, "\u65E0\u5B57\u5E55\u65F6\u8BFB\u53D6\u5B9E\u9645\u89C6\u9891\u5E76\u91C7\u6837\u6700\u591A 12 \u5E27\uFF0C\u6700\u591A 10 \u5206\u949F/64 MiB\uFF1B\u5F53\u524D\u53EA\u7406\u89E3\u753B\u9762\uFF0C\u97F3\u9891\u672A\u8F6C\u5199\uFF0C\u4E0D\u4F1A\u63A8\u6D4B\u97F3\u4E50\u6216\u5BF9\u767D\u3002\u7406\u89E3\u89C6\u9891\u5360\u7528\u73B0\u6709\u516C\u5F00\u5224\u65AD\u989D\u5EA6 1 \u6B21\uFF0C\u4E0D\u542F\u52A8\u8BC4\u8BBA\u3002\u5E27\u9644\u4EF6\u7531 DSH \u968F\u4F1A\u8BDD\u4FDD\u7559\u3002"),
-    button("\u8BFB\u53D6\u5E76\u7406\u89E3\u89C6\u9891\uFF081 \u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
+    button(status?.videoInspectionConsumed && !status?.videoInspection ? "\u91CD\u8BD5\u89C6\u9891\u7406\u89E3\uFF08\u6D88\u8017\u5269\u4F59\u989D\u5EA6 1 \u6B21\uFF09" : "\u8BFB\u53D6\u5E76\u7406\u89E3\u89C6\u9891\uFF081 \u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
       await call("inspectVideo");
       setNotice("\u89C6\u9891\u5185\u5BB9\u7406\u89E3\u5DF2\u4FDD\u5B58\uFF1B\u672A\u53D1\u9001\u8BC4\u8BBA\u3002");
-    }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspectionConsumed || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === "media-trial-2" || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
     videoText ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, videoText) : null,
     (0, import_react.createElement)("h3", null, "\u4E3B\u4EBA\u4F1A\u8BDD"),
     (0, import_react.createElement)("p", null, "\u9996\u6B21\u9A8C\u6536\u9884\u7559 1 \u6B21\u79C1\u804A\u8BF7\u6C42\uFF1B\u6D3B\u52A8\u7ED3\u675F\u7684\u6C47\u62A5\u53E6\u9884\u7559 1 \u6B21\u3002"),

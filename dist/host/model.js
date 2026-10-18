@@ -33,7 +33,7 @@ export class HostModel {
                 if (reason?.kind === 'completed' && job.text !== null)
                     job.resolve(job.text);
                 else
-                    job.reject(new PilotError('MODEL_TURN_FAILED'));
+                    job.reject(new PilotError(reason?.kind === 'max-tokens' ? 'MODEL_OUTPUT_LIMIT' : 'MODEL_TURN_FAILED'));
             }
         });
     }
@@ -76,14 +76,19 @@ export class HostModel {
             const selection = this.host.agentDefaultModel.currentSelection();
             if (!selection.provider || !selection.model)
                 throw new PilotError('DEFAULT_MODEL_MISSING');
+            let reasoningEffort = selection.reasoningEffort;
             if (job?.visionRoute) {
                 if (selection.provider !== job.visionRoute.provider || selection.model !== job.visionRoute.model)
                     throw new PilotError('MODEL_CHANGED_DURING_MEDIA');
-                await this.requireVision(selection, event.signal);
+                const info = await this.requireVision(selection, event.signal);
+                // Keep the owner's model route; select low only when this exact route declares it.
+                // Reasoning shares the fixed 2048 output-token ceiling with the JSON answer.
+                if (info.reasoning?.efforts.some(e => e.id === 'low'))
+                    reasoningEffort = 'low';
             }
             // Every actual loop attempt, including retries, consumes a durable reservation.
             this.store.reserveRequest(purpose, Date.now());
-            return { ...selection, maxTokens: LIMITS.outputTokens };
+            return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
         });
         // This preset has no retry plugin. Refuse any retry requested by a global plugin.
         ctx.on('agent/request-error', () => undefined);
@@ -153,6 +158,7 @@ export class HostModel {
         signal.throwIfAborted();
         if (!info.inputModalities?.includes('image'))
             throw new PilotError('DEFAULT_MODEL_VISION_UNAVAILABLE');
+        return info;
     }
     async session(privateChat, signal) {
         if (this.disposed)

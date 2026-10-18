@@ -88,7 +88,7 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : `无字幕，已获取 ${preflight.video.frameCount ?? 0} 张实际视频帧；音频未转写`}`) : null,
     h('h3', null, '视频内容'),
     h('p', null, '无字幕时读取实际视频并采样最多 12 帧，最多 10 分钟/64 MiB；当前只理解画面，音频未转写，不会推测音乐或对白。理解视频占用现有公开判断额度 1 次，不启动评论。帧附件由 DSH 随会话保留。'),
-    button('读取并理解视频（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspectionConsumed || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    button(status?.videoInspectionConsumed && !status?.videoInspection ? '重试视频理解（消耗剩余额度 1 次）' : '读取并理解视频（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === 'media-trial-2' || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
     videoText ? h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, videoText) : null,
     h('h3', null, '主人会话'), h('p', null, '首次验收预留 1 次私聊请求；活动结束的汇报另预留 1 次。'),
     h('textarea', { value: chat, onChange: (e: { target: { value: string } }) => setChat(e.target.value), maxLength: 4000, 'aria-label': '给大肥鱼的消息', style: { width: '100%', minHeight: 70 } }),

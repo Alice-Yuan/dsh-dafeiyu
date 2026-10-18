@@ -45,8 +45,8 @@ async function probe(config) {
     ctx.systemPrompt.context({ name: 'working-directory:current', order: 1, required: true, text: 'HOST_REQUIRED_DIRECTORY_CANARY' });
     const captures = [];
     const { LlmAdapter } = await module('dsh-llm');
-    let vision = true;
-    class Adapter extends LlmAdapter { async resolveModel(provider, id) { return { provider, id, name: id, inputModalities: vision ? ['text', 'image'] : ['text'] }; } async *stream(request) { captures.push(request); yield { type: 'text-delta', index: 0, text: 'Synthetic response' }; yield { type: 'finish', reason: { kind: 'stop' } }; } }
+    let vision = true, finishKind = 'stop';
+    class Adapter extends LlmAdapter { async resolveModel(provider, id) { return { provider, id, name: id, inputModalities: vision ? ['text', 'image'] : ['text'], reasoning: { efforts: [{id:'low',name:'Low'},{id:'high',name:'High'}] } }; } async *stream(request) { captures.push(request); yield { type: 'text-delta', index: 0, text: 'Synthetic response' }; yield { type: 'finish', reason: { kind: finishKind } }; } }
     ctx.llm.registerAdapter(['synthetic'], new Adapter());
     ctx.on('agent/error', event => { report.agentError = String(event.error?.message); }, { global: true });
     ctx.on('session/event', (_session, event) => { if (event.type === 'turn/end') report.lastTurn = event.data.reason; }, { global: true });
@@ -71,6 +71,7 @@ async function probe(config) {
     assert.equal(store.budget().used, 2); vision = true;
     const third = await model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'SYNTHETIC_PUBLIC', frames }, sig);
     const image = captures[2].messages.flatMap(m => m.content).find(b => b.type === 'image');
+    assert.equal(captures[2].reasoningEffort, 'low');
     assert.match(image?.attachment?.attachmentId, /^sha256:/); assert.equal(image.attachment.width, 32);
     assert.ok((await ctx.attachments.readImage(image.attachment)).data.byteLength > 0);
     report.checks.push('actual attachment store and Agent loop preserve JPEG frame; text-only route rejected before budget reservation');
@@ -81,6 +82,10 @@ async function probe(config) {
     await assert.rejects(model.ask({ purpose: 'private', persona: pilotConfig.persona, prompt: 'OVER_BUDGET' }, sig));
     assert.equal(captures.length, 3);
     report.checks.push('JSONL persisted private session resumes with history; public session isolated; purpose quota refuses excess before dispatch');
+    finishKind = 'max-tokens';
+    await assert.rejects(model.ask({ purpose: 'public', persona: pilotConfig.persona, prompt: 'OUTPUT_LIMIT', frames }, sig), /MODEL_OUTPUT_LIMIT/);
+    assert.equal(store.budget().used, 4); finishKind = 'stop';
+    report.checks.push('declared low reasoning applied only to image requests; output exhaustion remains charged and fails closed');
     await model.dispose(); model = null; await presetStub.dispose();
     await ctx.plugin((await module('dsh-agent-preset-registry')).default, { default: 'dafeyu-private' }).await();
     for (const pkg of ['dsh-api-remote-access', 'dsh-api-gateway']) await ctx.plugin((await module(pkg)).default).await();

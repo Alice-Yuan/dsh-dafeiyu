@@ -17,7 +17,7 @@ export interface PolicyContext {
   on(name: string, fn: (...args: any[]) => unknown): () => void;
 }
 export interface ModelHost {
-  llm: { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: string[] }> };
+  llm: { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: string[]; reasoning?: { efforts: { id: string }[] } }> };
   attachments: { saveImages(inputs: { data: Uint8Array; mediaType: 'image/jpeg'; name: string }[]): Promise<unknown[]> };
   agents: { create(options: Record<string, unknown>): Promise<AgentHandle>; resume(options: Record<string, unknown>): Promise<AgentHandle>; get(id: string): Agent | undefined };
   agentPresets: { mount(ctx: PolicyContext, id: string): Promise<unknown> };
@@ -44,7 +44,7 @@ export class HostModel implements PilotModel {
       if (event.type === 'turn/end' && event.data.turn === job.turn) {
         const reason = event.data.reason as { kind?: string };
         if (reason?.kind === 'completed' && job.text !== null) job.resolve(job.text);
-        else job.reject(new PilotError('MODEL_TURN_FAILED'));
+        else job.reject(new PilotError(reason?.kind === 'max-tokens' ? 'MODEL_OUTPUT_LIMIT' : 'MODEL_TURN_FAILED'));
       }
     });
   }
@@ -80,13 +80,17 @@ export class HostModel implements PilotModel {
       this.store.assertOwner(this.config().ownerUid);
       const selection = this.host.agentDefaultModel.currentSelection();
       if (!selection.provider || !selection.model) throw new PilotError('DEFAULT_MODEL_MISSING');
+      let reasoningEffort = selection.reasoningEffort;
       if (job?.visionRoute) {
         if (selection.provider !== job.visionRoute.provider || selection.model !== job.visionRoute.model) throw new PilotError('MODEL_CHANGED_DURING_MEDIA');
-        await this.requireVision(selection, event.signal);
+        const info = await this.requireVision(selection, event.signal);
+        // Keep the owner's model route; select low only when this exact route declares it.
+        // Reasoning shares the fixed 2048 output-token ceiling with the JSON answer.
+        if (info.reasoning?.efforts.some(e => e.id === 'low')) reasoningEffort = 'low';
       }
       // Every actual loop attempt, including retries, consumes a durable reservation.
       this.store.reserveRequest(purpose, Date.now());
-      return { ...selection, maxTokens: LIMITS.outputTokens };
+      return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
     });
     // This preset has no retry plugin. Refuse any retry requested by a global plugin.
     ctx.on('agent/request-error', () => undefined);
@@ -132,10 +136,11 @@ export class HostModel implements PilotModel {
       if (!privateChat) { await handle.dispose(); this.handles.delete(sessionId); }
     }
   }
-  private async requireVision(selection: { provider: string; model: string }, signal: AbortSignal): Promise<void> {
+  private async requireVision(selection: { provider: string; model: string }, signal: AbortSignal) {
     const info = await this.host.llm.resolveModelInfo(selection.provider, selection.model, signal);
     signal.throwIfAborted();
     if (!info.inputModalities?.includes('image')) throw new PilotError('DEFAULT_MODEL_VISION_UNAVAILABLE');
+    return info;
   }
   private async session(privateChat: boolean, signal: AbortSignal): Promise<AgentHandle> {
     if (this.disposed) throw new PilotError('HOST_DISPOSED');

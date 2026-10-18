@@ -83,7 +83,7 @@ export class DaFeiYuControl extends TypertRemoteService {
         busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
         privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
         videoInspection: store.get('videoInspection'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
-        diagnostic: { version: '0.1.0-alpha.6', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+        diagnostic: { version: '0.1.0-alpha.7', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
     }, false);
   }
   @Remote
@@ -130,14 +130,15 @@ export class DaFeiYuControl extends TypertRemoteService {
   inspectVideo(request: unknown, signal: AbortSignal): Promise<unknown> {
     return this.call('inspectVideo', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async lifetime => {
       if (this.runnerValue?.busy) throw new PilotError('RUN_BUSY');
-      const store = this.store(); if (store.get('videoInspectionConsumed')) throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
+        const store = this.store(); if (store.get('videoInspection')) throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
+        if (store.budget().grant !== 'initial') throw new PilotError('MODEL_BUDGET_EXHAUSTED');
       const config = configOf(this.currentConfig(), true), result = await this.runner().preflight(lifetime);
       if (!result.video.visual?.frames.length && !result.video.subtitle?.trim()) throw new PilotError('VIDEO_CONTENT_UNAVAILABLE');
       const budget = store.budget(); if (budget.used >= LIMITS.requests || budget.byPurpose.public >= 3) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
       // This explicit read-only analysis spends the existing public request budget. It never rearms a trial.
       store.set('videoInspectionConsumed', 'true');
       const answer = await this.model().ask({ purpose: 'public', persona: config.persona, frames: result.video.visual?.frames,
-        prompt: `${MEDIA_INSTRUCTION}请理解这个视频的实际内容。仅返回 JSON：{"summary":"简短概述","observations":[{"atSeconds":0,"description":"该时刻实际可见的内容"}],"limitations":["尚不能判断的内容"]}。观察时刻必须来自所提供的采样帧，音频未转写必须明确说明。\n` + JSON.stringify(publicVideo(result.video)) }, lifetime);
+          prompt: `${MEDIA_INSTRUCTION}用简短答案概述实际可见内容，不需要逐帧详解或识别作品名称。总字数不超过250字，观察最多3项。仅返回 JSON：{"summary":"简短概述","observations":[{"atSeconds":0,"description":"该时刻实际可见的内容"}],"limitations":["音频未转写"]}。观察时刻必须来自所提供的采样帧。\n` + JSON.stringify(publicVideo(result.video)) }, lifetime);
       let value: any; try { value = JSON.parse(answer.text); } catch { throw new PilotError('INVALID_VIDEO_ANALYSIS'); }
       const times = result.video.visual?.frames.map(f => f.atSeconds) ?? [];
       if (!value || typeof value.summary !== 'string' || value.summary.length > 2000 || !Array.isArray(value.observations) || value.observations.length > 12 ||

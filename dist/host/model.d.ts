@@ -70,6 +70,11 @@ export interface ModelHost {
     llm: {
         resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{
             inputModalities?: string[];
+            reasoning?: {
+                efforts: {
+                    id: string;
+                }[];
+            };
         }>;
     };
     attachments: {
