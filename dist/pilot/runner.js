@@ -20,13 +20,13 @@ export class PilotRunner {
         this.sleep = options.sleep ?? ((ms, signal) => delay(ms, undefined, { signal }));
     }
     get busy() { return this.starting || this.work !== null; }
-    async preflight(signal) {
+    async preflight(signal, visualRequested = false) {
         const config = configOf(this.config(), true);
         this.store.assertOwner(config.ownerUid);
         const account = await this.platform.account(signal);
         if (account.uid === config.ownerUid)
             throw new PilotError('BOT_EQUALS_OWNER');
-        const video = await this.platform.video(config.bvid, signal);
+        const video = await this.platform.video(config.bvid, signal, visualRequested);
         if (video.bvid !== config.bvid)
             throw new PilotError('VIDEO_MISMATCH');
         const comments = await this.readPages(video.aid, '0', signal, false);
@@ -157,6 +157,11 @@ export class PilotRunner {
     async decide(runId, video, baseline, reply, signal) {
         const run = this.active(runId, signal);
         const kind = reply ? 'reply' : 'comment';
+        if (!video.subtitle?.trim() && !video.visual?.frames.length) {
+            this.store.remember(runId, [reply?.id ?? 'initial']);
+            this.store.set('lastSkipReason:' + runId, 'VIDEO_CONTENT_UNAVAILABLE');
+            return;
+        }
         const root = reply ? this.store.actions(runId).find(a => a.kind === 'comment' && a.state === 'accepted' && a.remoteId === run.root) : null;
         if (reply && !root)
             throw new PilotError('THREAD_CONTEXT_MISSING');

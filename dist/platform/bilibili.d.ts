@@ -17,7 +17,7 @@ export declare class Bilibili implements BiliPort {
     private nav;
     account(signal: AbortSignal): Promise<Account>;
     private signed;
-    video(bvid: string, signal: AbortSignal): Promise<VideoMaterial>;
+    video(bvid: string, signal: AbortSignal, visualRequested?: boolean): Promise<VideoMaterial>;
     comments(aid: string, root: string, cursor: string | null, authenticated: boolean, signal: AbortSignal): Promise<CommentPage>;
     send(target: SendTarget, text: string, signal: AbortSignal): Promise<SendReceipt>;
     verify(target: SendTarget, id: string, uid: string, signal: AbortSignal): Promise<Visibility>;

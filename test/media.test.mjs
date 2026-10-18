@@ -30,6 +30,10 @@ test('decoder cancellation ends the owned process without shell execution',async
  const c=new AbortController(),op=runDecoder(process.execPath,['-e','setInterval(()=>{},1000)'],c.signal);setTimeout(()=>c.abort(),30);
  await assert.rejects(op,/CANCELLED/);
 });
+
+test('missing optional decoder is explicit and does not install anything',async()=>{
+ await assert.rejects(findDecoder(''),/MEDIA_DECODER_UNAVAILABLE/);
+});
 test('actual FFmpeg handles synthetic MP4, preserves timestamps and removes temporary media',async t=>{
  let decoder;try{decoder=await findDecoder();}catch{return t.skip('FFmpeg is an optional local runtime prerequisite');}
  const dir=await mkdtemp(resolve('tmp/media-test-'));

@@ -47,7 +47,8 @@ export declare class PilotStore {
         lifetimeUsed: number;
         grant: Grant;
     };
-    reserveRequest(purpose: Purpose, now: number): string;
+    assertCalibration(revision: string): void;
+    reserveRequest(purpose: Purpose, now: number, calibrationRevision?: string): string;
     begin(config: PilotConfig, accountUid: string, now: number, grant?: Grant): Run;
     runs(): Run[];
     run(id: string): Run;

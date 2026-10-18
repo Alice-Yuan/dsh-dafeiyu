@@ -41,6 +41,7 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private readonly lifetime;
     private serial;
     private operations;
+    private decoderCheck;
     constructor(owner: HostContext, live: LiveConfig);
     currentConfig(): PilotConfig;
     private revision;
@@ -48,6 +49,8 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private platform;
     private model;
     private runner;
+    private ownerContext;
+    private requestedVideo;
     private mediaOperation;
     installPolicy(ctx: PolicyContext, audience: 'private' | 'public'): void;
     private call;
@@ -57,7 +60,12 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     loginPoll(request: unknown, signal: AbortSignal): Promise<unknown>;
     logout(request: unknown, signal: AbortSignal): Promise<unknown>;
     preflight(request: unknown, signal: AbortSignal): Promise<unknown>;
+    models(request: unknown, signal: AbortSignal): Promise<unknown>;
+    saveModel(request: unknown, signal: AbortSignal): Promise<unknown>;
+    checkOwnerRequest(request: unknown, signal: AbortSignal): Promise<unknown>;
     inspectVideo(request: unknown, signal: AbortSignal): Promise<unknown>;
+    calibrateVideo(request: unknown, signal: AbortSignal): Promise<unknown>;
+    private inspect;
     videoEvidence(request: unknown, signal: AbortSignal): Promise<unknown>;
     reviewVideo(request: unknown, signal: AbortSignal): Promise<unknown>;
     chat(request: unknown, signal: AbortSignal): Promise<unknown>;

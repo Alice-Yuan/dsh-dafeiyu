@@ -76,8 +76,9 @@ test('no-subtitle media is resolved from verified BV/aid/cid and rejects mismatc
   assert.equal(u.pathname,'/x/player/playurl');assert.equal(u.searchParams.get('avid'),target.aid);assert.equal(u.searchParams.get('cid'),'20002');
   return ok({timelength:duration*1000,dash:{duration,video:[{codecs:'avc1.synthetic',width:640,height:360,baseUrl:'https://upos-synthetic.bilivideo.com/upgcxcode/a'}]}});
  },Date.now,{read:async(url,seconds)=>{captured++;assert.equal(seconds,54);return {source:'video-stream',frames:[],audio:'not-transcribed'};}});
- const video=await adapter.video(target.bvid,signal());assert.equal(video.visual.source,'video-stream');assert.equal(captured,1);
- duration=99;await assert.rejects(adapter.video(target.bvid,signal()),/MEDIA_METADATA_INVALID/);assert.equal(captured,1);
+ const metadata=await adapter.video(target.bvid,signal());assert.equal(metadata.visual,undefined);assert.equal(captured,0);
+ const video=await adapter.video(target.bvid,signal(),true);assert.equal(video.visual.source,'video-stream');assert.equal(captured,1);
+ duration=99;await assert.rejects(adapter.video(target.bvid,signal(),true),/MEDIA_METADATA_INVALID/);assert.equal(captured,1);
 });
 
 test('subtitle absence is explicit and untrusted subtitle URLs are rejected', async () => {

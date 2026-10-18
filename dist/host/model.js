@@ -11,6 +11,19 @@ export class HostModel {
     disposed = false;
     detach;
     get store() { return this.getStore(); }
+    get busy() { return this.pending.size > 0 || this.jobs.size > 0; }
+    selection() {
+        const raw = this.store.get('modelSelection');
+        if (!raw)
+            return this.host.agentDefaultModel.currentSelection();
+        try {
+            const v = JSON.parse(raw);
+            if (typeof v.provider === 'string' && v.provider && typeof v.model === 'string' && v.model)
+                return { provider: v.provider, model: v.model };
+        }
+        catch { /* Never silently fall back from a broken pin. */ }
+        throw new PilotError('MODEL_SELECTION_INVALID');
+    }
     constructor(host, getStore, config) {
         this.host = host;
         this.getStore = getStore;
@@ -73,7 +86,7 @@ export class HostModel {
             await next();
             event.signal.throwIfAborted();
             this.store.assertOwner(this.config().ownerUid);
-            const selection = this.host.agentDefaultModel.currentSelection();
+            const selection = this.selection();
             if (!selection.provider || !selection.model)
                 throw new PilotError('DEFAULT_MODEL_MISSING');
             let reasoningEffort = selection.reasoningEffort;
@@ -87,7 +100,7 @@ export class HostModel {
                     reasoningEffort = 'low';
             }
             // Every actual loop attempt, including retries, consumes a durable reservation.
-            this.store.reserveRequest(purpose, Date.now());
+            this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
             return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
         });
         // This preset has no retry plugin. Refuse any retry requested by a global plugin.
@@ -113,7 +126,7 @@ export class HostModel {
         if (request.frames?.length) {
             if (request.purpose !== 'public' || request.frames.length > MEDIA_LIMITS.frames || request.frames.some(f => !Number.isFinite(f.atSeconds) || f.atSeconds < 0 || f.jpeg.byteLength > MEDIA_LIMITS.frameBytes))
                 throw new PilotError('MODEL_MEDIA_DENIED');
-            visionRoute = this.host.agentDefaultModel.currentSelection();
+            visionRoute = this.selection();
             await this.requireVision(visionRoute, signal);
             signal.throwIfAborted();
             const refs = await this.host.attachments.saveImages(request.frames.map((f, i) => ({ data: f.jpeg, mediaType: 'image/jpeg', name: `video-frame-${i + 1}-${f.atSeconds.toFixed(3)}s.jpg` })));
@@ -133,7 +146,7 @@ export class HostModel {
         let rejectJob;
         const result = new Promise((resolve, reject) => {
             rejectJob = reject;
-            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, visionRoute, resolve, reject });
+            this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
         });
         const abort = () => { agent.cancel({ kind: 'user' }, { keepInbox: false }); rejectJob(new PilotError('MODEL_CANCELLED')); };
         lifetime.addEventListener('abort', abort, { once: true });
@@ -173,7 +186,7 @@ export class HostModel {
         if (!handle) {
             if (this.host.agents.get(sessionId))
                 throw new PilotError('SESSION_OPEN_IN_NATIVE_CHAT');
-            const options = { agentOptions: { ...this.host.agentDefaultModel.currentSelection(), maxTokens: LIMITS.outputTokens },
+            const options = { agentOptions: { ...this.selection(), maxTokens: LIMITS.outputTokens },
                 setup: async (agentCtx) => { await this.host.agentPresets.mount(agentCtx, preset); },
                 signal };
             try {

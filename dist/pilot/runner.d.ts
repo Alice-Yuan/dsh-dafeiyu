@@ -16,7 +16,7 @@ export declare class PilotRunner {
     private readonly sleep;
     constructor(store: PilotStore, platform: BiliPort, model: PilotModel, config: () => PilotConfig, options?: Options);
     get busy(): boolean;
-    preflight(signal: AbortSignal): Promise<{
+    preflight(signal: AbortSignal, visualRequested?: boolean): Promise<{
         account: Account;
         video: VideoMaterial;
         comments: Comment[];

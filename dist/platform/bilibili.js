@@ -34,7 +34,9 @@ export function commentOf(value, aid) {
     const member = obj(v.member);
     if (typeof v.ctime !== 'number' || !Number.isSafeInteger(v.ctime))
         throw new PilotError('PLATFORM_SCHEMA_CHANGED');
-    return { id: decimalId(v.rpid_str ?? v.rpid), uid: decimalId(member.mid), root: decimalId(v.root_str ?? v.root), parent: decimalId(v.parent_str ?? v.parent), text: str(obj(v.content).message, 2000), createdAt: v.ctime * 1000 };
+    const content = obj(v.content);
+    return { id: decimalId(v.rpid_str ?? v.rpid), uid: decimalId(member.mid), root: decimalId(v.root_str ?? v.root), parent: decimalId(v.parent_str ?? v.parent), text: str(content.message, 2000), createdAt: v.ctime * 1000,
+        mentionedUids: content.members === undefined ? [] : list(content.members).map(m => decimalId(obj(m).mid)) };
 }
 const API = 'https://api.bilibili.com';
 const PASSPORT = 'https://passport.bilibili.com';
@@ -115,7 +117,7 @@ export class Bilibili {
         const query = signWbi(params, key(wbi.img_url), key(wbi.sub_url), Math.floor(this.now() / 1000));
         return (await this.raw(API + path + '?' + query, signal, await this.credential())).data;
     }
-    async video(bvid, signal) {
+    async video(bvid, signal, visualRequested = false) {
         if (!/^BV[1-9A-HJ-NP-Za-km-z]{10}$/.test(bvid))
             throw new PilotError('INVALID_BVID');
         const { data } = await this.raw(API + '/x/web-interface/view?bvid=' + bvid, signal, await this.credential());
@@ -138,7 +140,7 @@ export class Bilibili {
             subtitle = list(obj(parseLossless(await boundedText(response))).body).map(v => str(obj(v).content, 2000)).join('\n').slice(0, 20_000);
         }
         const material = { bvid, aid, cid, title: str(data.title, 300), description: str(data.desc, 2000), subtitle };
-        if (!subtitle?.trim() && this.media) {
+        if (visualRequested && this.media) {
             if (typeof data.duration !== 'number' || !Number.isFinite(data.duration) || data.duration <= 0 || data.duration > 600)
                 throw new PilotError('MEDIA_DURATION_LIMIT');
             // Bind the stream to the server-resolved first-page cid; never take a client URL.

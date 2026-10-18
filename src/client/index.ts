@@ -15,7 +15,7 @@ export interface ClientContext {
       component: (props: DetailProps) => ReactElement | null): unknown;
   };
 }
-interface Snapshot { videoReview?: string | null; videoInspectionRevision?: string; config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string } }
+interface Snapshot { ownerVideoRequest?: string | null; ownerVideoBaselineAt?: string | null; modelPinned?: boolean; modelSelection?: { provider: string; model: string }; videoCalibrationConsumed?: boolean; videoReview?: string | null; videoInspectionRevision?: string; config: PilotConfig; revision: string; budget: { used: number; total: number; lifetimeUsed?: number; grant?: string; byPurpose: { private: number; public: number; summary: number } }; account: { uid: string } | null; busy: boolean; trialConsumed: boolean; configError: string; credentialError: string; privateSessionId: string | null; report: string | null; reportError: string | null; videoInspection?: string | null; videoInspectionConsumed?: boolean; mediaTrialConsumed?: boolean; run: { state: string; deadline: number; reason: string } | null; actions: { id: string; kind: string; text: string; state: string; remoteId: string; selfVisible: boolean | null; publicVisible: boolean | null }[]; diagnostic: { version: string; marker: string; decoderAvailable?: boolean } }
 export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [status, setStatus] = useState<Snapshot | null>(null);
   const [draft, setDraft] = useState<PilotConfig>({ ...DEFAULT_CONFIG });
@@ -26,6 +26,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   const [chat, setChat] = useState('你好，大肥鱼。'); const [answer, setAnswer] = useState('');
   const [evidence, setEvidence] = useState<{ revision: string; subtitle: string | null; frames: { atSeconds: number; image: string }[] } | null>(null);
   const [reviewNote, setReviewNote] = useState('');
+  const [modelRows, setModelRows] = useState<{ provider: string; name: string; models: { id: string; name: string; description?: string; inputModalities?: string[] }[] }[]>([]);
+  const [modelKey, setModelKey] = useState('');
   const mounted = useRef(true);
   const call = async (method: Method, request: unknown = {}, signal?: AbortSignal): Promise<any> => {
     if (!ctx) throw new Error('尚未连接 Desktop 宿主');
@@ -83,19 +85,32 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
       field('主人 UID（不是机器人账号）', 'ownerUid'), field('目标 BV 号', 'bvid'), field('公开人格', 'persona'), field('诊断标记（仅用于配置验证）', 'diagnosticMarker'),
       button('保存设置', () => act(async () => { await call('saveConfig', { config: draft, revision }); dirty.current = false; setNotice('已保存，并由宿主读取核对。'); })),
       button('重新读取已保存配置', () => act(async () => { dirty.current = false; setPreflight(null); await refresh(); setNotice('已重新读取宿主保存的配置。'); }))),
+    h('h3', null, '会话模型'),
+    h('p', null, status?.modelSelection ? `当前：${status.modelSelection.provider} / ${status.modelSelection.model}（${status.modelPinned ? '固定选择' : '跟随宿主默认'}）` : '尚未读取模型'),
+    button('读取宿主模型列表', () => act(async () => { setModelRows(await call('models')); })),
+    h('select', { 'aria-label': '大肥鱼会话模型', value: modelKey, disabled: disabled || !!status?.busy, onChange: (e: { target: { value: string } }) => setModelKey(e.target.value), style: { maxWidth: '100%', padding: 8 } },
+      h('option', { value: '' }, '请选择固定使用的模型'),
+      ...modelRows.flatMap(p => p.models.map(m => h('option', { key: JSON.stringify([p.provider,m.id]), value: JSON.stringify([p.provider,m.id]) }, p.name + ' / ' + m.name + (m.inputModalities?.includes('image') ? ' · 支持图像' : '') + (m.description ? ' · ' + m.description : ''))))),
+    button('保存固定模型', () => act(async () => { const [provider, model] = JSON.parse(modelKey); const result = await call('saveModel', { provider, model }); setNotice(result.imageSupported ? '模型已固定；支持画面输入。' : '模型已固定；不支持画面时会拒绝检看，不自动换模型。'); }), !modelKey || !!status?.busy),
+    h('p', null, '名称和说明来自宿主模型目录；不自动判断价格或切换备用模型。保存不发起生成请求，也不重置预算。'),
     h('h3', null, 'B站账号'), h('p', null, status?.account ? `已保存机器人账号 UID：${status.account.uid}（运行前会重新验证）` : '尚未登录'),
     button('扫码登录', () => act(async () => { setPreflight(null); setQr(await call('loginStart')); }), !!status?.trialConsumed || !!status?.busy),
     button('移除本地登录凭证', () => act(async () => { setQr(null); setPreflight(null); await call('logout'); }), !!status?.busy),
     qr ? h('img', { src: qr.image, alt: '用大肥鱼账号扫描 B站登录二维码', width: 240, height: 240 }) : null,
     button('只读预检', () => act(async () => { setPreflight(await call('preflight')); }), dirty.current || !status?.account || !!status?.busy),
-    preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : `无字幕，已获取 ${preflight.video.frameCount ?? 0} 张实际视频帧；音频未转写`}`) : null,
+    preflight ? h('p', null, `账号 ${preflight.account.name}（${preflight.account.uid}） · ${preflight.video.title} · 读取 ${preflight.commentsRead} 条评论 · ${preflight.video.hasSubtitle ? '有字幕' : '无字幕，默认跳过内容判断；未下载媒体或抽帧'}`) : null,
     h('h3', null, '视频内容'),
-    h('p', null, '无字幕时读取实际视频并采样最多 12 帧，最多 10 分钟/64 MiB；当前只理解画面，音频未转写，不会推测音乐或对白。理解视频占用现有公开判断额度 1 次，不启动评论。帧附件由 DSH 随会话保留。'),
-    button(status?.videoInspectionConsumed && !status?.videoInspection ? '重试视频理解（消耗剩余额度 1 次）' : '读取并理解视频（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === 'media-trial-2' || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    h('p', null, status?.diagnostic.decoderAvailable ? '画面解码器可用（FFmpeg / ffprobe）。' : '未检测到 FFmpeg / ffprobe：可正常读取字幕，画面分析暂不可用。插件不会自动安装外部程序。'),
+    h('p', null, '原视频临时文件处理后删除；预览不另存图片。交给模型的图像由 DSH 保存为会话附件，当前没有自动清理策略。一次只读校准最多提交3帧。'),
+    h('p', null, '平时只读字幕，不自动抽帧。主人在指定视频或大肥鱼自己的评论下真实 @ 它，用自然语言说“帮我看看这个视频里发生了什么”等即可。按 UID 验证，明确要求检看才放行。当前手动检查有限页评论，尚未接入全站@通知。'),
+    button(status?.ownerVideoBaselineAt ? '检查主人 @ 检看请求' : '建立主人 @ 请求基线', () => act(async () => { const result = await call('checkOwnerRequest'); setNotice(result.found ? '已核验主人检看指令；可在现有额度内显式执行，尚未抽帧或调用模型。' : '未发现基线之后的新指令；没有抽帧或调用模型。'); }), !!status?.busy || !status?.account),
+    h('p', null, status?.ownerVideoRequest ? '已记录主人检看请求；执行前会再次核验原评论。' : '尚无已核验的主人检看请求。'),
+    button('执行主人检看请求（1 次模型请求）', () => act(async () => { await call('inspectVideo'); setNotice('视频内容理解已保存；未发送评论。'); }), !status?.ownerVideoRequest || dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === 'media-trial-2' || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
     videoText ? h('div', null, h('h4', null, '模型分析 · ' + reviewLabel),
       h('p', null, '收到图像和返回答案不代表理解正确。请对照原帧检查具体描述；画面姿态、连续动作和因果可能被误读。'),
       h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, videoText),
-      button('加载原帧对照（不调用模型）', () => act(async () => { setEvidence(await call('videoEvidence')); }), !!status?.busy),
+      status?.mediaTrialConsumed ? button('改用剩余额度做一次只读校准', () => act(async () => { await call('calibrateVideo', { revision: status!.videoInspectionRevision, reallocateOnePublicRequest: true }); setEvidence(null); setNotice('校准分析已保存，仍待原帧复核；没有恢复试跑或发送。'); }), !status?.ownerVideoRequest || !!status?.busy || status?.run?.state !== 'cancelled' || !reviewLabel.startsWith('已驳回') || !!status?.videoCalibrationConsumed || (status?.budget.byPurpose.public ?? 3) >= 3 || (status?.budget.used ?? 4) >= 4) : null,
+      button('加载原帧对照（不调用模型）', () => act(async () => { setEvidence(await call('videoEvidence')); }), !status?.ownerVideoRequest || !!status?.busy),
       evidence && evidence.revision === status?.videoInspectionRevision ? h('div', null,
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12 } }, ...evidence.frames.map((f, i) => h('figure', { key: i, style: { margin: 0, maxWidth: 340 } }, h('img', { src: f.image, alt: `视频原帧 ${f.atSeconds.toFixed(3)} 秒`, width: 320, style: { maxWidth: '100%', height: 'auto' } }), h('figcaption', null, `${f.atSeconds.toFixed(3)} 秒`)))),
         evidence.subtitle ? h('p', { style: { whiteSpace: 'pre-wrap' } }, evidence.subtitle) : null,

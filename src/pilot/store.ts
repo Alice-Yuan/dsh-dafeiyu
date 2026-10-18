@@ -76,11 +76,28 @@ export class PilotStore {
     const lifetimeUsed = Number(this.db.prepare('SELECT COUNT(*) AS n FROM pilot_requests').get()!.n);
     return { used: byPurpose.private + byPurpose.public + byPurpose.summary, total: grant === 'initial' ? LIMITS.requests : 4, byPurpose, lifetimeUsed, grant };
   }
-  reserveRequest(purpose: Purpose, now: number): string {
+  assertCalibration(revision: string): void {
+    const run = this.runs().find(r => r.id === this.get('mediaTrialConsumed'));
+    let review: any; try { review = JSON.parse(this.get('videoReview') ?? 'null'); } catch { /* Fail closed. */ }
+    if (this.get('videoCalibrationConsumed')) throw new PilotError('VIDEO_CALIBRATION_ALREADY_CONSUMED');
+    if (this.get('activeGrant') !== 'media-trial-2' || !run || run.state !== 'cancelled' || run.reason !== 'OWNER_STOPPED' ||
+        this.runs().some(r => ['starting', 'running'].includes(r.state)) || !revision || revision !== this.inspectionRevision() ||
+        review?.revision !== revision || review?.decision !== 'rejected') throw new PilotError('VIDEO_CALIBRATION_NOT_READY');
+  }
+  reserveRequest(purpose: Purpose, now: number, calibrationRevision?: string): string {
     return this.transaction(() => {
+      if (calibrationRevision !== undefined) {
+        if (purpose !== 'public') throw new PilotError('MODEL_REQUEST_DENIED');
+        this.assertCalibration(calibrationRevision);
+      }
       const b = this.budget(); const cap = purpose === 'public' ? 3 : purpose === 'private' && b.grant !== 'initial' ? 0 : 1;
       if (b.used >= b.total || b.byPurpose[purpose] >= cap || b.lifetimeUsed >= 9) throw new PilotError('MODEL_BUDGET_EXHAUSTED');
-      const id = randomUUID(); this.db.prepare('INSERT INTO pilot_requests VALUES(?,?,?)').run(id, b.grant === 'initial' ? purpose : purpose + ':' + b.grant, now); return id;
+      const id = randomUUID(); this.db.prepare('INSERT INTO pilot_requests VALUES(?,?,?)').run(id, b.grant === 'initial' ? purpose : purpose + ':' + b.grant, now);
+      if (calibrationRevision !== undefined) {
+        this.set('videoInspectionArchive:' + calibrationRevision, JSON.stringify({ inspection: this.get('videoInspection'), review: this.get('videoReview') }));
+        this.set('videoCalibrationConsumed', JSON.stringify({ requestId: id, revision: calibrationRevision, at: now, grant: b.grant }));
+      }
+      return id;
     });
   }
   begin(config: PilotConfig, accountUid: string, now: number, grant: Grant = 'initial'): Run {

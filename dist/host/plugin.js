@@ -43,8 +43,9 @@ import { Bilibili } from '../platform/bilibili.js';
 import { WindowsVault } from '../platform/vault.js';
 import { HostModel } from './model.js';
 import { REQUESTS } from '../shared/remote.js';
-import { FfmpegMediaReader } from '../platform/media.js';
+import { FfmpegMediaReader, findDecoder } from '../platform/media.js';
 import { publicVideo, MEDIA_INSTRUCTION } from '../pilot/material.js';
+import { isOwnerVideoRequest } from '../pilot/owner-request.js';
 export const name = 'dafeyu';
 export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert', 'llm', 'attachments'];
 export const Config = s.object({
@@ -62,7 +63,11 @@ let DaFeiYuControl = (() => {
     let _loginPoll_decorators;
     let _logout_decorators;
     let _preflight_decorators;
+    let _models_decorators;
+    let _saveModel_decorators;
+    let _checkOwnerRequest_decorators;
     let _inspectVideo_decorators;
+    let _calibrateVideo_decorators;
     let _videoEvidence_decorators;
     let _reviewVideo_decorators;
     let _chat_decorators;
@@ -79,7 +84,11 @@ let DaFeiYuControl = (() => {
             _loginPoll_decorators = [Remote];
             _logout_decorators = [Remote];
             _preflight_decorators = [Remote];
+            _models_decorators = [Remote];
+            _saveModel_decorators = [Remote];
+            _checkOwnerRequest_decorators = [Remote];
             _inspectVideo_decorators = [Remote];
+            _calibrateVideo_decorators = [Remote];
             _videoEvidence_decorators = [Remote];
             _reviewVideo_decorators = [Remote];
             _chat_decorators = [Remote];
@@ -93,7 +102,11 @@ let DaFeiYuControl = (() => {
             __esDecorate(this, null, _loginPoll_decorators, { kind: "method", name: "loginPoll", static: false, private: false, access: { has: obj => "loginPoll" in obj, get: obj => obj.loginPoll }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _logout_decorators, { kind: "method", name: "logout", static: false, private: false, access: { has: obj => "logout" in obj, get: obj => obj.logout }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _preflight_decorators, { kind: "method", name: "preflight", static: false, private: false, access: { has: obj => "preflight" in obj, get: obj => obj.preflight }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _models_decorators, { kind: "method", name: "models", static: false, private: false, access: { has: obj => "models" in obj, get: obj => obj.models }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _saveModel_decorators, { kind: "method", name: "saveModel", static: false, private: false, access: { has: obj => "saveModel" in obj, get: obj => obj.saveModel }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _checkOwnerRequest_decorators, { kind: "method", name: "checkOwnerRequest", static: false, private: false, access: { has: obj => "checkOwnerRequest" in obj, get: obj => obj.checkOwnerRequest }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _inspectVideo_decorators, { kind: "method", name: "inspectVideo", static: false, private: false, access: { has: obj => "inspectVideo" in obj, get: obj => obj.inspectVideo }, metadata: _metadata }, null, _instanceExtraInitializers);
+            __esDecorate(this, null, _calibrateVideo_decorators, { kind: "method", name: "calibrateVideo", static: false, private: false, access: { has: obj => "calibrateVideo" in obj, get: obj => obj.calibrateVideo }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _videoEvidence_decorators, { kind: "method", name: "videoEvidence", static: false, private: false, access: { has: obj => "videoEvidence" in obj, get: obj => obj.videoEvidence }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _reviewVideo_decorators, { kind: "method", name: "reviewVideo", static: false, private: false, access: { has: obj => "reviewVideo" in obj, get: obj => obj.reviewVideo }, metadata: _metadata }, null, _instanceExtraInitializers);
             __esDecorate(this, null, _chat_decorators, { kind: "method", name: "chat", static: false, private: false, access: { has: obj => "chat" in obj, get: obj => obj.chat }, metadata: _metadata }, null, _instanceExtraInitializers);
@@ -113,6 +126,7 @@ let DaFeiYuControl = (() => {
         lifetime = new AbortController();
         serial = Promise.resolve();
         operations = new Set();
+        decoderCheck = null;
         constructor(owner, live) {
             super(owner, 'dafeyuControl', { namespace: 'dafeyu' });
             this.owner = owner;
@@ -133,6 +147,38 @@ let DaFeiYuControl = (() => {
         }
         model() { return this.modelValue ??= new HostModel(this.owner, () => this.store(), () => this.currentConfig()); }
         runner() { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
+        async ownerContext(signal) {
+            const result = await this.runner().preflight(signal);
+            const roots = [...new Set(this.store().actions().filter(a => a.kind === 'comment' && a.state === 'accepted' && a.remoteId && a.target.aid === result.video.aid).map(a => a.remoteId))].slice(-2);
+            for (const root of roots) {
+                let cursor = null;
+                for (let page = 0; page < LIMITS.pages; page++) {
+                    const replies = await this.platform().comments(result.video.aid, root, cursor, true, signal);
+                    result.comments.push(...replies.comments.slice(0, LIMITS.pageSize).filter(c => c.parent === root));
+                    if (!replies.next || replies.next === cursor)
+                        break;
+                    cursor = replies.next;
+                }
+            }
+            return result;
+        }
+        async requestedVideo(signal, preview = false) {
+            const store = this.store(), config = this.currentConfig();
+            const saved = store.get('ownerVideoRequest');
+            if (!saved)
+                throw new PilotError('OWNER_VIDEO_REQUEST_REQUIRED');
+            const request = JSON.parse(saved);
+            if (!preview && store.get('ownerVideoRequestUsed:' + request.id))
+                throw new PilotError('OWNER_VIDEO_REQUEST_CONSUMED');
+            const result = await this.ownerContext(signal);
+            const comment = result.comments.find(c => c.id === request.id);
+            if (request.bvid !== config.bvid || request.accountUid !== result.account.uid || !comment ||
+                !isOwnerVideoRequest(comment, config.ownerUid, result.account.uid, Number(store.get('ownerVideoBaselineAt'))))
+                throw new PilotError('OWNER_VIDEO_REQUEST_REQUIRED');
+            // The normal preflight never downloads media. Only a current verified owner command gets here.
+            const video = await this.platform().video(config.bvid, signal, true);
+            return { ...result, video, ownerRequestId: request.id };
+        }
         async mediaOperation(signal, action) {
             if (this.mediaController || this.runnerValue?.busy)
                 throw new PilotError('RUN_BUSY');
@@ -190,12 +236,22 @@ let DaFeiYuControl = (() => {
                 catch (error) {
                     credentialError = safeError(error);
                 }
+                if (!this.decoderCheck || Date.now() - this.decoderCheck.at > 30_000) {
+                    let available = false;
+                    try {
+                        await findDecoder();
+                        available = true;
+                    }
+                    catch { /* Optional runtime. No installation or path disclosure. */ }
+                    this.decoderCheck = { at: Date.now(), available };
+                }
                 return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
                     configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
                     busy: !!this.mediaController || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
                     privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
-                    videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
-                    diagnostic: { version: '0.1.0-alpha.8', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker } };
+                    videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
+                    ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
+                    diagnostic: { version: '0.1.0-alpha.9', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
             }, false);
         }
         saveConfig(request, signal) {
@@ -243,38 +299,99 @@ let DaFeiYuControl = (() => {
                 return { account: result.account, video: { bvid: result.video.bvid, title: result.video.title, hasSubtitle: !!result.video.subtitle?.trim(), frameCount: result.video.visual?.frames.length ?? 0, durationSeconds: result.video.visual?.durationSeconds ?? null, audio: result.video.visual?.audio ?? 'not-transcribed' }, commentsRead: result.comments.length, revision: this.revision() };
             }));
         }
+        models(request, signal) {
+            return this.call('models', request, signal, async (_value, lifetime) => {
+                const llm = this.owner.llm;
+                const rows = await Promise.all(llm.listProviders().map(async (provider) => {
+                    try {
+                        const models = await llm.listModels(provider.id);
+                        return { provider: provider.id, name: provider.name ?? provider.id, models };
+                    }
+                    catch {
+                        return { provider: provider.id, name: provider.name ?? provider.id, models: [], unavailable: true };
+                    }
+                }));
+                lifetime.throwIfAborted();
+                return rows;
+            });
+        }
+        saveModel(request, signal) {
+            return this.call('saveModel', request, signal, async (value, lifetime) => {
+                if (this.mediaController || this.runnerValue?.busy || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                const llm = this.owner.llm;
+                if (!llm.listProviders().some(p => p.id === value.provider) || !(await llm.listModels(value.provider)).some(m => m.id === value.model))
+                    throw new PilotError('MODEL_NOT_IN_CATALOG');
+                const info = await llm.resolveModelInfo(value.provider, value.model, lifetime);
+                lifetime.throwIfAborted();
+                this.store().assertOwner(this.currentConfig().ownerUid);
+                this.store().set('modelSelection', JSON.stringify({ provider: value.provider, model: value.model }));
+                return { saved: true, imageSupported: !!info.inputModalities?.includes('image') };
+            });
+        }
+        checkOwnerRequest(request, signal) {
+            return this.call('checkOwnerRequest', request, signal, async (_value, lifetime) => {
+                const store = this.store(), config = this.currentConfig();
+                if (!store.get('ownerVideoBaselineAt'))
+                    store.set('ownerVideoBaselineAt', String(Date.now()));
+                const result = await this.ownerContext(lifetime);
+                const found = result.comments.filter(c => isOwnerVideoRequest(c, config.ownerUid, result.account.uid, Number(store.get('ownerVideoBaselineAt'))) && !store.get('ownerVideoRequestUsed:' + c.id)).sort((a, b) => b.createdAt - a.createdAt)[0];
+                if (found)
+                    store.set('ownerVideoRequest', JSON.stringify({ id: found.id, accountUid: result.account.uid, bvid: result.video.bvid, at: found.createdAt }));
+                return { found: !!found, baselineAt: store.get('ownerVideoBaselineAt') };
+            });
+        }
         inspectVideo(request, signal) {
-            return this.call('inspectVideo', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async (lifetime) => {
+            return this.inspect(request, signal, false);
+        }
+        calibrateVideo(request, signal) {
+            return this.inspect(request, signal, true);
+        }
+        inspect(request, signal, calibration) {
+            return this.call(calibration ? 'calibrateVideo' : 'inspectVideo', request, signal, async (requestValue, lifetime) => this.mediaOperation(lifetime, async (lifetime) => {
                 if (this.runnerValue?.busy)
                     throw new PilotError('RUN_BUSY');
                 const store = this.store();
-                if (store.get('videoInspection'))
-                    throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
-                if (store.budget().grant !== 'initial')
-                    throw new PilotError('MODEL_BUDGET_EXHAUSTED');
-                const config = configOf(this.currentConfig(), true), result = await this.runner().preflight(lifetime);
+                if (calibration)
+                    store.assertCalibration(requestValue.revision);
+                else {
+                    if (store.get('videoInspection'))
+                        throw new PilotError('VIDEO_INSPECTION_ALREADY_CONSUMED');
+                    if (store.budget().grant !== 'initial')
+                        throw new PilotError('MODEL_BUDGET_EXHAUSTED');
+                }
+                const config = configOf(this.currentConfig(), true), result = await this.requestedVideo(lifetime);
                 if (!result.video.visual?.frames.length && !result.video.subtitle?.trim())
                     throw new PilotError('VIDEO_CONTENT_UNAVAILABLE');
+                if (calibration)
+                    store.matchInspection(result.account.uid, result.video);
                 const budget = store.budget();
-                if (budget.used >= LIMITS.requests || budget.byPurpose.public >= 3)
+                if (budget.used >= budget.total || budget.byPurpose.public >= 3)
                     throw new PilotError('MODEL_BUDGET_EXHAUSTED');
                 // This explicit read-only analysis spends the existing public request budget. It never rearms a trial.
                 store.set('videoInspectionConsumed', 'true');
-                const answer = await this.model().ask({ purpose: 'public', persona: config.persona, frames: result.video.visual?.frames,
-                    prompt: `${MEDIA_INSTRUCTION}用简短答案概述实际可见内容，不需要逐帧详解或识别作品名称。总字数不超过250字，观察最多3项。仅返回 JSON：{"summary":"简短概述","observations":[{"atSeconds":0,"description":"该时刻实际可见的内容"}],"limitations":["音频未转写"]}。观察时刻必须来自所提供的采样帧。\n` + JSON.stringify(publicVideo(result.video)) }, lifetime);
-                let value;
+                const allFrames = result.video.visual?.frames;
+                // Calibration compares isolated first/middle/last frames in one request, never a model loop.
+                const frames = allFrames?.length ? [...new Set([0, Math.floor(allFrames.length / 2), allFrames.length - 1])].map(i => allFrames[i]) : allFrames;
+                const inputMaterial = publicVideo({ ...result.video, ...(result.video.visual && frames ? { visual: { ...result.video.visual, frames } } : {}) });
+                store.set('ownerVideoRequestUsed:' + result.ownerRequestId, 'true');
+                const answer = await this.model().ask({ purpose: 'public', persona: config.persona, frames, calibrationRevision: calibration ? requestValue.revision : undefined,
+                    prompt: `${MEDIA_INSTRUCTION}${calibration ? '本次只核对所附的独立采样帧；分别描述每张帧中可见的主体姿态与环境，看不清就写无法判断。不要把不同帧的姿态混在一起。' : ''}用简短答案概述实际可见内容，不需要逐帧详解或识别作品名称。总字数不超过250字，观察最多3项。仅返回 JSON：{"summary":"简短概述","observations":[{"atSeconds":0,"description":"该时刻实际可见的内容"}],"limitations":["音频未转写"]}。观察时刻必须来自所提供的采样帧。\n` + JSON.stringify(inputMaterial) }, lifetime);
+                lifetime.throwIfAborted();
+                let parsed;
                 try {
-                    value = JSON.parse(answer.text);
+                    parsed = JSON.parse(answer.text);
                 }
                 catch {
                     throw new PilotError('INVALID_VIDEO_ANALYSIS');
                 }
-                const times = result.video.visual?.frames.map(f => f.atSeconds) ?? [];
+                const value = parsed;
+                const times = frames?.map(f => f.atSeconds) ?? [];
                 if (!value || typeof value.summary !== 'string' || value.summary.length > 2000 || !Array.isArray(value.observations) || value.observations.length > 12 ||
                     value.observations.some((o) => !o || typeof o.atSeconds !== 'number' || typeof o.description !== 'string' || o.description.length > 1000 || !times.some(t => Math.abs(t - o.atSeconds) < 0.1)) ||
                     !Array.isArray(value.limitations) || value.limitations.length > 12 || value.limitations.some((s) => typeof s !== 'string' || s.length > 1000))
                     throw new PilotError('INVALID_VIDEO_ANALYSIS');
-                const report = { video: `https://www.bilibili.com/video/${config.bvid}/`, accountUid: result.account.uid, material: publicVideo(result.video), analysis: { summary: value.summary, observations: value.observations.map((o) => ({ atSeconds: o.atSeconds, description: o.description })), limitations: value.limitations }, audio: 'not-transcribed', sessionId: answer.sessionId };
+                const report = { video: `https://www.bilibili.com/video/${config.bvid}/`, accountUid: result.account.uid, material: publicVideo(result.video), inputFrameTimes: times, analysis: { summary: value.summary, observations: value.observations.map((o) => ({ atSeconds: o.atSeconds, description: o.description })), limitations: value.limitations }, audio: 'not-transcribed', sessionId: answer.sessionId };
                 store.set('videoInspection', JSON.stringify(report));
                 return report;
             }));
@@ -284,7 +401,7 @@ let DaFeiYuControl = (() => {
                 const store = this.store();
                 if (!store.inspectionRevision())
                     throw new PilotError('VIDEO_INSPECTION_REQUIRED');
-                const result = await this.runner().preflight(lifetime);
+                const result = await this.requestedVideo(lifetime, true);
                 store.matchInspection(result.account.uid, result.video);
                 lifetime.throwIfAborted();
                 const revision = store.inspectionRevision();

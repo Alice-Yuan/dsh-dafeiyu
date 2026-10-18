@@ -58,6 +58,7 @@ export interface Comment {
     parent: string;
     text: string;
     createdAt: number;
+    mentionedUids?: string[];
 }
 export interface CommentPage {
     comments: Comment[];
@@ -80,7 +81,7 @@ export interface Visibility {
 }
 export interface BiliPort {
     account(signal: AbortSignal): Promise<Account>;
-    video(bvid: string, signal: AbortSignal): Promise<VideoMaterial>;
+    video(bvid: string, signal: AbortSignal, visualRequested?: boolean): Promise<VideoMaterial>;
     comments(aid: string, root: string, cursor: string | null, authenticated: boolean, signal: AbortSignal): Promise<CommentPage>;
     send(target: SendTarget, text: string, signal: AbortSignal): Promise<SendReceipt>;
     verify(target: SendTarget, id: string, uid: string, signal: AbortSignal): Promise<Visibility>;
@@ -91,6 +92,7 @@ export interface ModelRequest {
     prompt: string;
     persona: string;
     frames?: VideoFrame[] | undefined;
+    calibrationRevision?: string | undefined;
 }
 export interface PilotModel {
     ask(request: ModelRequest, signal: AbortSignal): Promise<{

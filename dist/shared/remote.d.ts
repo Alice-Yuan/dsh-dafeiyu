@@ -16,7 +16,17 @@ export declare const REQUESTS: {
     }, z.core.$strict>;
     readonly logout: z.ZodObject<{}, z.core.$strict>;
     readonly preflight: z.ZodObject<{}, z.core.$strict>;
+    readonly checkOwnerRequest: z.ZodObject<{}, z.core.$strict>;
+    readonly models: z.ZodObject<{}, z.core.$strict>;
+    readonly saveModel: z.ZodObject<{
+        provider: z.ZodString;
+        model: z.ZodString;
+    }, z.core.$strict>;
     readonly inspectVideo: z.ZodObject<{}, z.core.$strict>;
+    readonly calibrateVideo: z.ZodObject<{
+        revision: z.ZodString;
+        reallocateOnePublicRequest: z.ZodLiteral<true>;
+    }, z.core.$strict>;
     readonly videoEvidence: z.ZodObject<{}, z.core.$strict>;
     readonly reviewVideo: z.ZodObject<{
         revision: z.ZodString;

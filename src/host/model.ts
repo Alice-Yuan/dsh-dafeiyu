@@ -17,14 +17,14 @@ export interface PolicyContext {
   on(name: string, fn: (...args: any[]) => unknown): () => void;
 }
 export interface ModelHost {
-  llm: { resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: string[]; reasoning?: { efforts: { id: string }[] } }> };
+  llm: { listProviders(): { id: string; name?: string }[]; listModels(provider: string): Promise<{ provider: string; id: string; name: string; inputModalities?: string[] }[]>; resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ inputModalities?: string[]; reasoning?: { efforts: { id: string }[] } }> };
   attachments: { saveImages(inputs: { data: Uint8Array; mediaType: 'image/jpeg'; name: string }[]): Promise<unknown[]> };
   agents: { create(options: Record<string, unknown>): Promise<AgentHandle>; resume(options: Record<string, unknown>): Promise<AgentHandle>; get(id: string): Agent | undefined };
   agentPresets: { mount(ctx: PolicyContext, id: string): Promise<unknown> };
   agentDefaultModel: { currentSelection(): { provider: string; model: string; reasoningEffort?: string } };
   on(name: string, fn: (...args: any[]) => unknown): () => void;
 }
-interface Job { purpose: Purpose; rpcId: string; turn: number | null; text: string | null; visionRoute?: { provider: string; model: string } | undefined; resolve(value: string): void; reject(error: Error): void }
+interface Job { purpose: Purpose; rpcId: string; turn: number | null; text: string | null; calibrationRevision?: string | undefined; visionRoute?: { provider: string; model: string } | undefined; resolve(value: string): void; reject(error: Error): void }
 export class HostModel implements PilotModel {
   private jobs = new Map<string, Job>();
   private handles = new Map<string, AgentHandle>();
@@ -32,6 +32,13 @@ export class HostModel implements PilotModel {
   private disposed = false;
   private readonly detach: () => void;
   private get store(): PilotStore { return this.getStore(); }
+  get busy(): boolean { return this.pending.size > 0 || this.jobs.size > 0; }
+  selection(): { provider: string; model: string; reasoningEffort?: string } {
+    const raw = this.store.get('modelSelection');
+    if (!raw) return this.host.agentDefaultModel.currentSelection();
+    try { const v = JSON.parse(raw); if (typeof v.provider === 'string' && v.provider && typeof v.model === 'string' && v.model) return { provider: v.provider, model: v.model }; } catch { /* Never silently fall back from a broken pin. */ }
+    throw new PilotError('MODEL_SELECTION_INVALID');
+  }
   constructor(private readonly host: ModelHost, private readonly getStore: () => PilotStore, private readonly config: () => PilotConfig) {
     this.detach = host.on('session/event', (session: { id: string }, event: SessionEvent) => {
       const job = this.jobs.get(session.id); if (!job || job.turn === null) return;
@@ -78,7 +85,7 @@ export class HostModel implements PilotModel {
       if (this.disposed || !purpose || event.step !== 1) throw new PilotError('MODEL_REQUEST_DENIED');
       await next(); event.signal.throwIfAborted();
       this.store.assertOwner(this.config().ownerUid);
-      const selection = this.host.agentDefaultModel.currentSelection();
+      const selection = this.selection();
       if (!selection.provider || !selection.model) throw new PilotError('DEFAULT_MODEL_MISSING');
       let reasoningEffort = selection.reasoningEffort;
       if (job?.visionRoute) {
@@ -89,7 +96,7 @@ export class HostModel implements PilotModel {
         if (info.reasoning?.efforts.some(e => e.id === 'low')) reasoningEffort = 'low';
       }
       // Every actual loop attempt, including retries, consumes a durable reservation.
-      this.store.reserveRequest(purpose, Date.now());
+      this.store.reserveRequest(purpose, Date.now(), job?.calibrationRevision);
       return { ...selection, ...(reasoningEffort === undefined ? {} : { reasoningEffort }), maxTokens: LIMITS.outputTokens };
     });
     // This preset has no retry plugin. Refuse any retry requested by a global plugin.
@@ -106,7 +113,7 @@ export class HostModel implements PilotModel {
     let visionRoute: { provider: string; model: string } | undefined;
     if (request.frames?.length) {
       if (request.purpose !== 'public' || request.frames.length > MEDIA_LIMITS.frames || request.frames.some(f => !Number.isFinite(f.atSeconds) || f.atSeconds < 0 || f.jpeg.byteLength > MEDIA_LIMITS.frameBytes)) throw new PilotError('MODEL_MEDIA_DENIED');
-      visionRoute = this.host.agentDefaultModel.currentSelection(); await this.requireVision(visionRoute, signal);
+      visionRoute = this.selection(); await this.requireVision(visionRoute, signal);
       signal.throwIfAborted();
       const refs = await this.host.attachments.saveImages(request.frames.map((f, i) => ({ data: f.jpeg, mediaType: 'image/jpeg' as const, name: `video-frame-${i + 1}-${f.atSeconds.toFixed(3)}s.jpg` })));
       signal.throwIfAborted();
@@ -121,7 +128,7 @@ export class HostModel implements PilotModel {
     let rejectJob!: (error: Error) => void;
     const result = new Promise<string>((resolve, reject) => {
       rejectJob = reject;
-      this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, visionRoute, resolve, reject });
+      this.jobs.set(sessionId, { purpose: request.purpose, rpcId: randomUUID(), turn: null, text: null, calibrationRevision: request.calibrationRevision, visionRoute, resolve, reject });
     });
     const abort = () => { agent.cancel({ kind: 'user' }, { keepInbox: false }); rejectJob(new PilotError('MODEL_CANCELLED')); };
     lifetime.addEventListener('abort', abort, { once: true });
@@ -152,7 +159,7 @@ export class HostModel implements PilotModel {
     const preset = 'dafeyu-' + audience;
     if (!handle) {
       if (this.host.agents.get(sessionId)) throw new PilotError('SESSION_OPEN_IN_NATIVE_CHAT');
-      const options = { agentOptions: { ...this.host.agentDefaultModel.currentSelection(), maxTokens: LIMITS.outputTokens },
+      const options = { agentOptions: { ...this.selection(), maxTokens: LIMITS.outputTokens },
         setup: async (agentCtx: PolicyContext) => { await this.host.agentPresets.mount(agentCtx, preset); },
         signal };
       try {

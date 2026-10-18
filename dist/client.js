@@ -190,7 +190,11 @@ var REQUESTS = {
   loginPoll: import_zod.z.object({ loginId: import_zod.z.string().uuid() }).strict(),
   logout: import_zod.z.object({}).strict(),
   preflight: import_zod.z.object({}).strict(),
+  checkOwnerRequest: import_zod.z.object({}).strict(),
+  models: import_zod.z.object({}).strict(),
+  saveModel: import_zod.z.object({ provider: import_zod.z.string().min(1).max(200), model: import_zod.z.string().min(1).max(300) }).strict(),
   inspectVideo: import_zod.z.object({}).strict(),
+  calibrateVideo: import_zod.z.object({ revision: import_zod.z.string().regex(/^[a-f0-9]{64}$/), reallocateOnePublicRequest: import_zod.z.literal(true) }).strict(),
   videoEvidence: import_zod.z.object({}).strict(),
   reviewVideo: import_zod.z.object({ revision: import_zod.z.string().regex(/^[a-f0-9]{64}$/), decision: import_zod.z.enum(["approved", "rejected"]), note: import_zod.z.string().max(1e3) }).strict(),
   chat: import_zod.z.object({ text: import_zod.z.string().min(1).max(4e3) }).strict(),
@@ -247,6 +251,8 @@ function SettingsPanel({ ctx }) {
   const [answer, setAnswer] = (0, import_react.useState)("");
   const [evidence, setEvidence] = (0, import_react.useState)(null);
   const [reviewNote, setReviewNote] = (0, import_react.useState)("");
+  const [modelRows, setModelRows] = (0, import_react.useState)([]);
+  const [modelKey, setModelKey] = (0, import_react.useState)("");
   const mounted = (0, import_react.useRef)(true);
   const call = async (method, request = {}, signal) => {
     if (!ctx) throw new Error("\u5C1A\u672A\u8FDE\u63A5 Desktop \u5BBF\u4E3B");
@@ -393,6 +399,23 @@ function SettingsPanel({ ctx }) {
         setNotice("\u5DF2\u91CD\u65B0\u8BFB\u53D6\u5BBF\u4E3B\u4FDD\u5B58\u7684\u914D\u7F6E\u3002");
       }))
     ),
+    (0, import_react.createElement)("h3", null, "\u4F1A\u8BDD\u6A21\u578B"),
+    (0, import_react.createElement)("p", null, status?.modelSelection ? `\u5F53\u524D\uFF1A${status.modelSelection.provider} / ${status.modelSelection.model}\uFF08${status.modelPinned ? "\u56FA\u5B9A\u9009\u62E9" : "\u8DDF\u968F\u5BBF\u4E3B\u9ED8\u8BA4"}\uFF09` : "\u5C1A\u672A\u8BFB\u53D6\u6A21\u578B"),
+    button("\u8BFB\u53D6\u5BBF\u4E3B\u6A21\u578B\u5217\u8868", () => act(async () => {
+      setModelRows(await call("models"));
+    })),
+    (0, import_react.createElement)(
+      "select",
+      { "aria-label": "\u5927\u80A5\u9C7C\u4F1A\u8BDD\u6A21\u578B", value: modelKey, disabled: disabled || !!status?.busy, onChange: (e) => setModelKey(e.target.value), style: { maxWidth: "100%", padding: 8 } },
+      (0, import_react.createElement)("option", { value: "" }, "\u8BF7\u9009\u62E9\u56FA\u5B9A\u4F7F\u7528\u7684\u6A21\u578B"),
+      ...modelRows.flatMap((p) => p.models.map((m) => (0, import_react.createElement)("option", { key: JSON.stringify([p.provider, m.id]), value: JSON.stringify([p.provider, m.id]) }, p.name + " / " + m.name + (m.inputModalities?.includes("image") ? " \xB7 \u652F\u6301\u56FE\u50CF" : "") + (m.description ? " \xB7 " + m.description : ""))))
+    ),
+    button("\u4FDD\u5B58\u56FA\u5B9A\u6A21\u578B", () => act(async () => {
+      const [provider, model] = JSON.parse(modelKey);
+      const result = await call("saveModel", { provider, model });
+      setNotice(result.imageSupported ? "\u6A21\u578B\u5DF2\u56FA\u5B9A\uFF1B\u652F\u6301\u753B\u9762\u8F93\u5165\u3002" : "\u6A21\u578B\u5DF2\u56FA\u5B9A\uFF1B\u4E0D\u652F\u6301\u753B\u9762\u65F6\u4F1A\u62D2\u7EDD\u68C0\u770B\uFF0C\u4E0D\u81EA\u52A8\u6362\u6A21\u578B\u3002");
+    }), !modelKey || !!status?.busy),
+    (0, import_react.createElement)("p", null, "\u540D\u79F0\u548C\u8BF4\u660E\u6765\u81EA\u5BBF\u4E3B\u6A21\u578B\u76EE\u5F55\uFF1B\u4E0D\u81EA\u52A8\u5224\u65AD\u4EF7\u683C\u6216\u5207\u6362\u5907\u7528\u6A21\u578B\u3002\u4FDD\u5B58\u4E0D\u53D1\u8D77\u751F\u6210\u8BF7\u6C42\uFF0C\u4E5F\u4E0D\u91CD\u7F6E\u9884\u7B97\u3002"),
     (0, import_react.createElement)("h3", null, "B\u7AD9\u8D26\u53F7"),
     (0, import_react.createElement)("p", null, status?.account ? `\u5DF2\u4FDD\u5B58\u673A\u5668\u4EBA\u8D26\u53F7 UID\uFF1A${status.account.uid}\uFF08\u8FD0\u884C\u524D\u4F1A\u91CD\u65B0\u9A8C\u8BC1\uFF09` : "\u5C1A\u672A\u767B\u5F55"),
     button("\u626B\u7801\u767B\u5F55", () => act(async () => {
@@ -408,22 +431,34 @@ function SettingsPanel({ ctx }) {
     button("\u53EA\u8BFB\u9884\u68C0", () => act(async () => {
       setPreflight(await call("preflight"));
     }), dirty.current || !status?.account || !!status?.busy),
-    preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : `\u65E0\u5B57\u5E55\uFF0C\u5DF2\u83B7\u53D6 ${preflight.video.frameCount ?? 0} \u5F20\u5B9E\u9645\u89C6\u9891\u5E27\uFF1B\u97F3\u9891\u672A\u8F6C\u5199`}`) : null,
+    preflight ? (0, import_react.createElement)("p", null, `\u8D26\u53F7 ${preflight.account.name}\uFF08${preflight.account.uid}\uFF09 \xB7 ${preflight.video.title} \xB7 \u8BFB\u53D6 ${preflight.commentsRead} \u6761\u8BC4\u8BBA \xB7 ${preflight.video.hasSubtitle ? "\u6709\u5B57\u5E55" : "\u65E0\u5B57\u5E55\uFF0C\u9ED8\u8BA4\u8DF3\u8FC7\u5185\u5BB9\u5224\u65AD\uFF1B\u672A\u4E0B\u8F7D\u5A92\u4F53\u6216\u62BD\u5E27"}`) : null,
     (0, import_react.createElement)("h3", null, "\u89C6\u9891\u5185\u5BB9"),
-    (0, import_react.createElement)("p", null, "\u65E0\u5B57\u5E55\u65F6\u8BFB\u53D6\u5B9E\u9645\u89C6\u9891\u5E76\u91C7\u6837\u6700\u591A 12 \u5E27\uFF0C\u6700\u591A 10 \u5206\u949F/64 MiB\uFF1B\u5F53\u524D\u53EA\u7406\u89E3\u753B\u9762\uFF0C\u97F3\u9891\u672A\u8F6C\u5199\uFF0C\u4E0D\u4F1A\u63A8\u6D4B\u97F3\u4E50\u6216\u5BF9\u767D\u3002\u7406\u89E3\u89C6\u9891\u5360\u7528\u73B0\u6709\u516C\u5F00\u5224\u65AD\u989D\u5EA6 1 \u6B21\uFF0C\u4E0D\u542F\u52A8\u8BC4\u8BBA\u3002\u5E27\u9644\u4EF6\u7531 DSH \u968F\u4F1A\u8BDD\u4FDD\u7559\u3002"),
-    button(status?.videoInspectionConsumed && !status?.videoInspection ? "\u91CD\u8BD5\u89C6\u9891\u7406\u89E3\uFF08\u6D88\u8017\u5269\u4F59\u989D\u5EA6 1 \u6B21\uFF09" : "\u8BFB\u53D6\u5E76\u7406\u89E3\u89C6\u9891\uFF081 \u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
+    (0, import_react.createElement)("p", null, status?.diagnostic.decoderAvailable ? "\u753B\u9762\u89E3\u7801\u5668\u53EF\u7528\uFF08FFmpeg / ffprobe\uFF09\u3002" : "\u672A\u68C0\u6D4B\u5230 FFmpeg / ffprobe\uFF1A\u53EF\u6B63\u5E38\u8BFB\u53D6\u5B57\u5E55\uFF0C\u753B\u9762\u5206\u6790\u6682\u4E0D\u53EF\u7528\u3002\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u5B89\u88C5\u5916\u90E8\u7A0B\u5E8F\u3002"),
+    (0, import_react.createElement)("p", null, "\u539F\u89C6\u9891\u4E34\u65F6\u6587\u4EF6\u5904\u7406\u540E\u5220\u9664\uFF1B\u9884\u89C8\u4E0D\u53E6\u5B58\u56FE\u7247\u3002\u4EA4\u7ED9\u6A21\u578B\u7684\u56FE\u50CF\u7531 DSH \u4FDD\u5B58\u4E3A\u4F1A\u8BDD\u9644\u4EF6\uFF0C\u5F53\u524D\u6CA1\u6709\u81EA\u52A8\u6E05\u7406\u7B56\u7565\u3002\u4E00\u6B21\u53EA\u8BFB\u6821\u51C6\u6700\u591A\u63D0\u4EA43\u5E27\u3002"),
+    (0, import_react.createElement)("p", null, "\u5E73\u65F6\u53EA\u8BFB\u5B57\u5E55\uFF0C\u4E0D\u81EA\u52A8\u62BD\u5E27\u3002\u4E3B\u4EBA\u5728\u6307\u5B9A\u89C6\u9891\u6216\u5927\u80A5\u9C7C\u81EA\u5DF1\u7684\u8BC4\u8BBA\u4E0B\u771F\u5B9E @ \u5B83\uFF0C\u7528\u81EA\u7136\u8BED\u8A00\u8BF4\u201C\u5E2E\u6211\u770B\u770B\u8FD9\u4E2A\u89C6\u9891\u91CC\u53D1\u751F\u4E86\u4EC0\u4E48\u201D\u7B49\u5373\u53EF\u3002\u6309 UID \u9A8C\u8BC1\uFF0C\u660E\u786E\u8981\u6C42\u68C0\u770B\u624D\u653E\u884C\u3002\u5F53\u524D\u624B\u52A8\u68C0\u67E5\u6709\u9650\u9875\u8BC4\u8BBA\uFF0C\u5C1A\u672A\u63A5\u5165\u5168\u7AD9@\u901A\u77E5\u3002"),
+    button(status?.ownerVideoBaselineAt ? "\u68C0\u67E5\u4E3B\u4EBA @ \u68C0\u770B\u8BF7\u6C42" : "\u5EFA\u7ACB\u4E3B\u4EBA @ \u8BF7\u6C42\u57FA\u7EBF", () => act(async () => {
+      const result = await call("checkOwnerRequest");
+      setNotice(result.found ? "\u5DF2\u6838\u9A8C\u4E3B\u4EBA\u68C0\u770B\u6307\u4EE4\uFF1B\u53EF\u5728\u73B0\u6709\u989D\u5EA6\u5185\u663E\u5F0F\u6267\u884C\uFF0C\u5C1A\u672A\u62BD\u5E27\u6216\u8C03\u7528\u6A21\u578B\u3002" : "\u672A\u53D1\u73B0\u57FA\u7EBF\u4E4B\u540E\u7684\u65B0\u6307\u4EE4\uFF1B\u6CA1\u6709\u62BD\u5E27\u6216\u8C03\u7528\u6A21\u578B\u3002");
+    }), !!status?.busy || !status?.account),
+    (0, import_react.createElement)("p", null, status?.ownerVideoRequest ? "\u5DF2\u8BB0\u5F55\u4E3B\u4EBA\u68C0\u770B\u8BF7\u6C42\uFF1B\u6267\u884C\u524D\u4F1A\u518D\u6B21\u6838\u9A8C\u539F\u8BC4\u8BBA\u3002" : "\u5C1A\u65E0\u5DF2\u6838\u9A8C\u7684\u4E3B\u4EBA\u68C0\u770B\u8BF7\u6C42\u3002"),
+    button("\u6267\u884C\u4E3B\u4EBA\u68C0\u770B\u8BF7\u6C42\uFF081 \u6B21\u6A21\u578B\u8BF7\u6C42\uFF09", () => act(async () => {
       await call("inspectVideo");
       setNotice("\u89C6\u9891\u5185\u5BB9\u7406\u89E3\u5DF2\u4FDD\u5B58\uFF1B\u672A\u53D1\u9001\u8BC4\u8BBA\u3002");
-    }), dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === "media-trial-2" || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
+    }), !status?.ownerVideoRequest || dirty.current || !status?.account || !!status?.busy || !!status?.videoInspection || status?.budget.grant === "media-trial-2" || (status?.budget.used ?? 5) >= 5 || (status?.budget.byPurpose.public ?? 3) >= 3),
     videoText ? (0, import_react.createElement)(
       "div",
       null,
       (0, import_react.createElement)("h4", null, "\u6A21\u578B\u5206\u6790 \xB7 " + reviewLabel),
       (0, import_react.createElement)("p", null, "\u6536\u5230\u56FE\u50CF\u548C\u8FD4\u56DE\u7B54\u6848\u4E0D\u4EE3\u8868\u7406\u89E3\u6B63\u786E\u3002\u8BF7\u5BF9\u7167\u539F\u5E27\u68C0\u67E5\u5177\u4F53\u63CF\u8FF0\uFF1B\u753B\u9762\u59FF\u6001\u3001\u8FDE\u7EED\u52A8\u4F5C\u548C\u56E0\u679C\u53EF\u80FD\u88AB\u8BEF\u8BFB\u3002"),
       (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, videoText),
+      status?.mediaTrialConsumed ? button("\u6539\u7528\u5269\u4F59\u989D\u5EA6\u505A\u4E00\u6B21\u53EA\u8BFB\u6821\u51C6", () => act(async () => {
+        await call("calibrateVideo", { revision: status.videoInspectionRevision, reallocateOnePublicRequest: true });
+        setEvidence(null);
+        setNotice("\u6821\u51C6\u5206\u6790\u5DF2\u4FDD\u5B58\uFF0C\u4ECD\u5F85\u539F\u5E27\u590D\u6838\uFF1B\u6CA1\u6709\u6062\u590D\u8BD5\u8DD1\u6216\u53D1\u9001\u3002");
+      }), !status?.ownerVideoRequest || !!status?.busy || status?.run?.state !== "cancelled" || !reviewLabel.startsWith("\u5DF2\u9A73\u56DE") || !!status?.videoCalibrationConsumed || (status?.budget.byPurpose.public ?? 3) >= 3 || (status?.budget.used ?? 4) >= 4) : null,
       button("\u52A0\u8F7D\u539F\u5E27\u5BF9\u7167\uFF08\u4E0D\u8C03\u7528\u6A21\u578B\uFF09", () => act(async () => {
         setEvidence(await call("videoEvidence"));
-      }), !!status?.busy),
+      }), !status?.ownerVideoRequest || !!status?.busy),
       evidence && evidence.revision === status?.videoInspectionRevision ? (0, import_react.createElement)(
         "div",
         null,

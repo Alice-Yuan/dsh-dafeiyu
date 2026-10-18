@@ -68,6 +68,16 @@ export interface PolicyContext {
 }
 export interface ModelHost {
     llm: {
+        listProviders(): {
+            id: string;
+            name?: string;
+        }[];
+        listModels(provider: string): Promise<{
+            provider: string;
+            id: string;
+            name: string;
+            inputModalities?: string[];
+        }[]>;
         resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{
             inputModalities?: string[];
             reasoning?: {
@@ -111,6 +121,12 @@ export declare class HostModel implements PilotModel {
     private disposed;
     private readonly detach;
     private get store();
+    get busy(): boolean;
+    selection(): {
+        provider: string;
+        model: string;
+        reasoningEffort?: string;
+    };
     constructor(host: ModelHost, getStore: () => PilotStore, config: () => PilotConfig);
     installPolicy(ctx: PolicyContext, audience: 'private' | 'public'): void;
     ask(request: ModelRequest, signal: AbortSignal): Promise<{

@@ -98,6 +98,31 @@ test('video review binds displayed evidence and exact analysis; rejection and ch
  assert.equal(store.budget().used,0);store.close();
  const reopened=new PilotStore(path);t.after(()=>reopened.close());assert.throws(()=>reopened.assertVideoReviewed(),/VIDEO_REVIEW_REQUIRED/);
 });
+test('read-only calibration uses one existing public slot atomically and preserves cancelled run on restart', t => {
+  const {store,path}=fixture(t);
+  const first=store.begin(config,'30001',100);store.saveRun({...first,state:'completed'});
+  const inspection=JSON.stringify({accountUid:'30001',material:{bvid:config.bvid,subtitle:'Synthetic'},analysis:{summary:'Old'}});
+  store.set('videoInspection',inspection);const revision=store.inspectionRevision();store.set('videoEvidenceViewed',revision);
+  store.recordVideoReview(revision,'approved','Checked');
+  assert.throws(()=>store.reserveRequest('public',150,revision),/VIDEO_CALIBRATION_NOT_READY/);
+  const second=store.begin(config,'30001',200,'media-trial-2');store.reserveRequest('public',201);
+  assert.throws(()=>store.reserveRequest('public',202,revision),/VIDEO_CALIBRATION_NOT_READY/);
+  store.saveRun({...second,state:'cancelled',reason:'OWNER_STOPPED'});
+  store.recordVideoReview(revision,'rejected','PRIVATE_REVIEW_NOTE');
+  assert.throws(()=>store.reserveRequest('private',202,revision),/MODEL_REQUEST_DENIED/);
+  assert.throws(()=>store.reserveRequest('public',202,'stale'),/VIDEO_CALIBRATION_NOT_READY/);
+  const before=store.runs();const id=store.reserveRequest('public',202,revision);
+  assert.equal(store.budget().used,2);assert.equal(store.budget().byPurpose.public,2);
+  assert.equal(JSON.parse(store.get('videoCalibrationConsumed')).requestId,id);
+  assert.equal(JSON.parse(store.get('videoInspectionArchive:'+revision)).inspection,inspection);
+  assert.throws(()=>store.reserveRequest('public',203,revision),/VIDEO_CALIBRATION_ALREADY_CONSUMED/);
+  assert.deepEqual(store.runs(),before);assert.equal(store.actions().length,0);
+  store.close();const reopened=new PilotStore(path);t.after(()=>reopened.close());
+  assert.equal(reopened.run(second.id).state,'cancelled');
+  assert.throws(()=>reopened.reserveRequest('public',204,revision),/VIDEO_CALIBRATION_ALREADY_CONSUMED/);
+  assert.throws(()=>reopened.begin(config,'30001',205,'media-trial-2'),/TRIAL_ALREADY_CONSUMED/);
+});
+
 test('pilot hard limits: one comment and two direct replies; no private marker in public input', async t => {
   const f = setup(t); await f.runner.start('30001', new AbortController().signal); await f.runner.idle();
   assert.equal(f.sent.length, 3); assert.equal(f.sent[0].target.root, '0');
