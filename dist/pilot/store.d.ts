@@ -36,6 +36,8 @@ export declare class PilotStore {
     set(key: string, value: string): void;
     assertOwner(ownerUid: string): void;
     bindOwner(ownerUid: string): void;
+    boundAccountUid(): string | null;
+    bindAccount(ownerUid: string, accountUid: string): void;
     inspectionRevision(): string;
     matchInspection(accountUid: string, video: VideoMaterial): void;
     recordVideoReview(revision: string, decision: 'approved' | 'rejected', note: string): void;

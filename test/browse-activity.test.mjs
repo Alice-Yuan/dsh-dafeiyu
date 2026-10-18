@@ -25,6 +25,15 @@ function fixture(t) {
   return { pilot, path, readings, activity, add, model };
 }
 const sig = () => new AbortController().signal;
+test('curation reads the configured persona instead of fixing a second identity in the prompt', async t => {
+  const { readings, activity, add, model } = fixture(t); const run = add();
+  let persona = 'PERSONA_BEFORE_EDIT', captured = '';
+  const curator = new Curator(readings, activity, async (prompt, signal, reserve) => {
+    captured = prompt; return model()(prompt, signal, reserve);
+  }, () => now, () => persona);
+  persona = 'PERSONA_AFTER_EDIT'; await curator.preview(run.id, account, sig());
+  assert.match(captured, /^PERSONA_AFTER_EDIT/); assert.doesNotMatch(captured, /PERSONA_BEFORE_EDIT/);
+});
 test('reference ranges, disabled sends and settings revision preserve counters', t => {
   const f = fixture(t), s = f.activity.settings(); assert.deepEqual(s.policy, DEFAULT_BROWSE_POLICY);
   for (const policy of [{ ...s.policy, perDay: 51 }, { ...s.policy, replyPerRound: 0 }, { ...s.policy, commentPerRound: 21 }, { ...s.policy, autoComment: true }, { ...s.policy, replyToComments: true }, { ...s.policy, force: true }]) assert.equal(REQUESTS.saveBrowsePolicy.safeParse({ policy, revision: s.revision }).success, false);

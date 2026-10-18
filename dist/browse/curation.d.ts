@@ -8,7 +8,8 @@ export declare class Curator {
     private readonly activity;
     private readonly model;
     private readonly now;
+    private readonly persona;
     private running;
-    constructor(readings: BrowseStore, activity: ActivityStore, model: PreviewModel, now?: () => number);
+    constructor(readings: BrowseStore, activity: ActivityStore, model: PreviewModel, now?: () => number, persona?: () => string);
     preview(runId: string, account: string, signal: AbortSignal): Promise<import("./contracts.js").PreviewRound>;
 }

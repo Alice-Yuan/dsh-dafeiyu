@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { LIMITS, PilotError, type PilotConfig, type Purpose, type SendTarget, type Visibility } from './contracts.js';
+import { LIMITS, PilotError, samePublicAuthorization, type PilotConfig, type Purpose, type SendTarget, type Visibility } from './contracts.js';
 import type { VideoMaterial } from './contracts.js';
 import { publicVideo } from './material.js';
 
@@ -53,6 +53,23 @@ export class PilotStore {
   set(key: string, value: string): void { this.db.prepare('INSERT INTO pilot_meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
   assertOwner(ownerUid: string): void { const saved = this.get('ownerUid'); if (saved && saved !== ownerUid) throw new PilotError('STORE_CONFIG_MISMATCH'); }
   bindOwner(ownerUid: string): void { if (!ownerUid) throw new PilotError('CONFIG_INCOMPLETE'); this.assertOwner(ownerUid); this.set('ownerUid', ownerUid); }
+  boundAccountUid(): string | null {
+    // Old installations already have run snapshots. Recover the binding from
+    // them without editing the run or resetting its consumed grant.
+    const identities = new Set(this.runs().map(run => run.accountUid));
+    const saved = this.get('botUid'); if (saved) identities.add(saved);
+    if (identities.size > 1 || [...identities].some(uid => !/^[1-9]\d{0,24}$/.test(uid))) throw new PilotError('STORE_ACCOUNT_MISMATCH');
+    return identities.values().next().value ?? null;
+  }
+  bindAccount(ownerUid: string, accountUid: string): void {
+    this.transaction(() => {
+      this.bindOwner(ownerUid);
+      if (!/^[1-9]\d{0,24}$/.test(accountUid) || accountUid === ownerUid) throw new PilotError('BOT_EQUALS_OWNER');
+      const saved = this.boundAccountUid();
+      if (saved && saved !== accountUid) throw new PilotError('ACCOUNT_CHANGED');
+      this.set('botUid', accountUid);
+    });
+  }
   inspectionRevision(): string { const value = this.get('videoInspection'); return value ? createHash('sha256').update(value).digest('hex') : ''; }
   matchInspection(accountUid: string, video: VideoMaterial): void {
     let saved: any; try { saved = JSON.parse(this.get('videoInspection') ?? 'null'); } catch { /* Reject invalid evidence. */ }
@@ -108,7 +125,7 @@ export class PilotStore {
       if ((grant === 'initial' && this.get('trialConsumed')) || (grant === 'media-trial-2' && this.get('mediaTrialConsumed'))) throw new PilotError('TRIAL_ALREADY_CONSUMED');
       if (grant === 'media-trial-2') {
         const previous = this.runs().find(r => r.id === this.get('trialConsumed'));
-        if (!previous || previous.state !== 'completed' || previous.accountUid !== accountUid || JSON.stringify(previous.config) !== JSON.stringify(config) || !this.get('videoInspection')) throw new PilotError('MEDIA_TRIAL_NOT_READY');
+        if (!previous || previous.state !== 'completed' || previous.accountUid !== accountUid || !samePublicAuthorization(previous.config, config) || !this.get('videoInspection')) throw new PilotError('MEDIA_TRIAL_NOT_READY');
         let inspection: any; try { inspection = JSON.parse(this.get('videoInspection')!); } catch { throw new PilotError('MEDIA_TRIAL_NOT_READY'); }
         if (inspection.accountUid !== accountUid || inspection.material?.bvid !== config.bvid || !inspection.analysis?.summary ||
             (!inspection.material?.visual?.frames?.length && !inspection.material?.subtitle?.trim())) throw new PilotError('MEDIA_TRIAL_NOT_READY');
@@ -117,7 +134,10 @@ export class PilotStore {
         if (this.get('latestReport')) this.set('report:' + previous.id, this.get('latestReport')!);
         this.set('activeGrant', grant);
       }
+      const boundAccount = this.boundAccountUid();
+      if (boundAccount && boundAccount !== accountUid) throw new PilotError('ACCOUNT_CHANGED');
       const run: Run = { id: randomUUID(), accountUid, config: structuredClone(config), startedAt: now, deadline: now + LIMITS.durationMs, state: 'running', reason: '', root: '', grant };
+      this.set('botUid', accountUid);
       this.set(grant === 'initial' ? 'trialConsumed' : 'mediaTrialConsumed', run.id); this.saveRun(run); return run;
     });
   }

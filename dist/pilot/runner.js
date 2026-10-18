@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { configOf, intentOf, LIMITS, PilotError, safeError } from './contracts.js';
+import { configOf, intentOf, LIMITS, PilotError, safeError, samePublicAuthorization } from './contracts.js';
 import { publicVideo, MEDIA_INSTRUCTION } from './material.js';
 export class PilotRunner {
     store;
@@ -88,7 +88,9 @@ export class PilotRunner {
         signal.throwIfAborted();
         const run = this.store.run(runId);
         this.store.assertActive(run, this.now());
-        if (JSON.stringify(this.config()) !== JSON.stringify(run.config))
+        // The run retains its original persona snapshot; only authorization identity
+        // must still match live settings. Cosmetic edits cannot renew the run.
+        if (!samePublicAuthorization(this.config(), run.config))
             throw new PilotError('CONFIG_CHANGED');
         return run;
     }

@@ -59,12 +59,14 @@ export class Bilibili {
     fetcher;
     now;
     media;
+    acceptAccount;
     login = null;
-    constructor(vault, fetcher = fetch, now = Date.now, media) {
+    constructor(vault, fetcher = fetch, now = Date.now, media, acceptAccount) {
         this.vault = vault;
         this.fetcher = fetcher;
         this.now = now;
         this.media = media;
+        this.acceptAccount = acceptAccount;
     }
     async hasCredential() { const c = await this.vault.read(); return c ? { uid: c.uid, name: '' } : null; }
     async raw(url, signal, credential = null, body) {
@@ -110,7 +112,13 @@ export class Bilibili {
             throw new PilotError('ACCOUNT_CHANGED');
         return data;
     }
-    async account(signal) { const n = await this.nav(signal); return { uid: decimalId(n.mid), name: str(n.uname, 80) }; }
+    async account(signal) {
+        const n = await this.nav(signal);
+        signal.throwIfAborted();
+        const account = { uid: decimalId(n.mid), name: str(n.uname, 80) };
+        this.acceptAccount?.(account);
+        return account;
+    }
     async signed(path, params, signal) {
         const nav = await this.nav(signal);
         const wbi = obj(nav.wbi_img);
@@ -302,9 +310,13 @@ export class Bilibili {
         signal.throwIfAborted();
         if (this.login !== login)
             throw new PilotError('LOGIN_CANCELLED');
+        const account = { uid: credential.uid, name: str(checked.uname, 80) };
+        // Internal server callback sees the verified UID before credentials can be
+        // replaced. The client cannot choose or override the binding.
+        this.acceptAccount?.(account);
         await this.vault.write(credential);
         this.login = null;
-        return { state: 'authenticated', account: { uid: credential.uid, name: str(checked.uname, 80) } };
+        return { state: 'authenticated', account };
     }
     async logout() { this.login = null; await this.vault.remove(); }
 }

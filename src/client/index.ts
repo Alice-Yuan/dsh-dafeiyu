@@ -7,6 +7,7 @@ import type { PreviewRound, CurationResult } from '../browse/contracts.js';
 
 export const name = 'dafeyu-settings';
 interface Snapshot {
+  privateBudget?: { grantId: string | null; limit: number; used: number; remaining: number; lifetimeUsed: number; outputTokens: number; enabled: boolean } | null;
   browseSettings?: { policy: BrowsePolicy; revision: string };
   browseUsage?: { day: string; picked: number; remaining: number; requests: number; todayRequests: number; latest: PreviewRound | null };
 }
@@ -94,11 +95,11 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
   if (status?.videoInspection) { try { const v = JSON.parse(status.videoInspection); videoText = [v.analysis.summary, ...v.analysis.observations.map((o: { atSeconds: number; description: string }) => `${o.atSeconds.toFixed(1)} 秒：${o.description}`), '理解范围：画面采样，音频未转写。', ...v.analysis.limitations].join('\n'); } catch { videoText = '内容理解记录无法读取，请查看诊断。'; } }
   return h('section', { 'aria-label': '大肥鱼设置', 'data-mode': 'pilot', style: { padding: 24, border: '1px solid #71809666', borderRadius: 16, maxWidth: 760 } },
     h('small', null, 'DaFeiYu · 单视频实验版'), h('h2', null, '大肥鱼'),
-    h('p', { role: 'status' }, status ? `本轮模型请求 ${status.budget.used} / ${status.budget.total} · 累计 ${status.budget.lifetimeUsed ?? status.budget.used} · ${status.run?.state ?? '尚未启动'} · 15 分钟 / 1 条评论 / 2 条回复` : '尚未连接 Desktop 运行状态'),
+    h('p', { role: 'status' }, status ? `旧试跑请求 ${status.budget.used} / ${status.budget.total} · 历史试跑累计 ${status.budget.lifetimeUsed ?? status.budget.used} · ${status.run?.state ?? '尚未启动'} · 15 分钟 / 1 条评论 / 2 条回复` : '尚未连接 Desktop 运行状态'),
     error ? h('p', { role: 'alert', style: { color: '#e15b64', overflowWrap: 'anywhere' } }, error) : null,
     status?.configError || status?.credentialError ? h('p', { role: 'alert' }, status.configError || status.credentialError) : null,
     notice ? h('p', null, notice) : null,
-    h('fieldset', { disabled: disabled || status?.busy || status?.trialConsumed }, h('legend', null, '身份与目标'),
+    h('fieldset', { disabled: disabled || status?.busy }, h('legend', null, '身份、目标与人格（历史公开授权不变）'),
       field('主人 UID（不是机器人账号）', 'ownerUid'), field('目标 BV 号', 'bvid'), field('公开人格', 'persona'), field('诊断标记（仅用于配置验证）', 'diagnosticMarker'),
       button('保存设置', () => act(async () => { await call('saveConfig', { config: draft, revision }); dirty.current = false; setNotice('已保存，并由宿主读取核对。'); })),
       button('重新读取已保存配置', () => act(async () => { dirty.current = false; setPreflight(null); await refresh(); setNotice('已重新读取宿主保存的配置。'); }))),
@@ -111,7 +112,8 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
     button('保存固定模型', () => act(async () => { const [provider, model] = JSON.parse(modelKey); const result = await call('saveModel', { provider, model }); setNotice(result.imageSupported ? '模型已固定；支持画面输入。' : '模型已固定；不支持画面时会拒绝检看，不自动换模型。'); }), !modelKey || !!status?.busy),
     h('p', null, '名称和说明来自宿主模型目录；不自动判断价格或切换备用模型。保存不发起生成请求，也不重置预算。'),
     h('h3', null, 'B站账号'), h('p', null, status?.account ? `已保存机器人账号 UID：${status.account.uid}（运行前会重新验证）` : '尚未登录'),
-    button('扫码登录', () => act(async () => { setPreflight(null); setQr(await call('loginStart')); }), !!status?.trialConsumed || !!status?.busy),
+    button('扫码登录 / 同账号重新认证', () => act(async () => { setPreflight(null); setQr(await call('loginStart')); }), !!status?.busy),
+    h('p', null, '重新认证只能使用已绑定的机器人 UID；注销或重登不会恢复试跑、发送次数或模型额度。'),
     button('移除本地登录凭证', () => act(async () => { setQr(null); setPreflight(null); await call('logout'); }), !!status?.busy),
     qr ? h('img', { src: qr.image, alt: '用大肥鱼账号扫描 B站登录二维码', width: 240, height: 240 }) : null,
     button('只读预检', () => act(async () => { setPreflight(await call('preflight')); }), dirty.current || !status?.account || !!status?.busy),
@@ -173,9 +175,10 @@ export function SettingsPanel({ ctx }: { ctx?: ClientContext }): ReactElement {
         h('textarea', { 'aria-label': '视频复核备注', value: reviewNote, maxLength: 1000, placeholder: '记下误读或复核依据（仅存本地，不进入模型）', onChange: (e: { target: { value: string } }) => setReviewNote(e.target.value), style: { width: '100%', minHeight: 60 } }),
         button('描述与原帧一致，标记通过', () => act(async () => { await call('reviewVideo', { revision: evidence.revision, decision: 'approved', note: reviewNote }); setNotice('视频描述已复核；未启动试跑。'); }), !!status?.busy),
         button('发现误读，驳回此分析', () => act(async () => { await call('reviewVideo', { revision: evidence.revision, decision: 'rejected', note: reviewNote }); setNotice('分析已驳回，不能据此启动新试跑。'); }), !!status?.busy)) : null) : null,
-    h('h3', null, '主人会话'), h('p', null, '首次验收预留 1 次私聊请求；活动结束的汇报另预留 1 次。'),
+    h('h3', null, '主人会话'), h('p', null, status?.privateBudget ? `独立私聊额度：已用 ${status.privateBudget.used} / ${status.privateBudget.limit}，剩余 ${status.privateBudget.remaining}；累计 ${status.privateBudget.lifetimeUsed}。每次最多 ${status.privateBudget.outputTokens} 输出 tokens。` : '先保存主人 UID；私聊不需要目标 BV 或 B站登录。'),
+    h('p', null, '私聊额度与公开试跑独立，失败计次、停止或重启不补额。目前未开放新增额度，默认规则待主人确认；旧公开预算与记录保持。'),
     h('textarea', { value: chat, onChange: (e: { target: { value: string } }) => setChat(e.target.value), maxLength: 4000, 'aria-label': '给大肥鱼的消息', style: { width: '100%', minHeight: 70 } }),
-    button('发送到大肥鱼会话', () => act(async () => { const result = await call('chat', { text: chat }); setAnswer(result.text); }), !chat.trim() || status?.budget.grant === 'media-trial-2' || !!status?.budget.byPurpose.private || !!status?.busy),
+    button('发送到大肥鱼会话', () => act(async () => { const result = await call('chat', { text: chat }); setAnswer(result.text); }), !chat.trim() || !status?.privateBudget?.enabled || !!status?.busy),
     answer ? h('p', { style: { whiteSpace: 'pre-wrap' } }, answer) : null,
     status?.privateSessionId ? h('p', null, '持久会话已建立，可在侧栏打开「大肥鱼 · 主人会话」。') : null,
     h('h3', null, '限定视频试跑'),

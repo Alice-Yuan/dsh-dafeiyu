@@ -9,6 +9,14 @@ export class PilotError extends Error {
 export const LIMITS = Object.freeze({ requests: 5, outputTokens: 2048, durationMs: 900_000,
     comments: 1, replies: 2, textLength: 150, pages: 3, pageSize: 20, polls: 15, pollMs: 60_000 });
 export const DEFAULT_PERSONA = '你是大肥鱼，一个 AI。使用中文，温和、好奇，表达具体而克制；不假装人类，不编造看过的内容。';
+// Only these fields identify the historical public grant. Persona and diagnostic
+// text may change without rewriting or enlarging any recorded authorization.
+export function publicAuthorization(config) {
+    return { ownerUid: config.ownerUid, bvid: config.bvid };
+}
+export function samePublicAuthorization(a, b) {
+    return a.ownerUid === b.ownerUid && a.bvid === b.bvid;
+}
 export const DEFAULT_CONFIG = { ownerUid: '', bvid: '', persona: DEFAULT_PERSONA, diagnosticMarker: '' };
 export function decimalId(value) {
     if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)

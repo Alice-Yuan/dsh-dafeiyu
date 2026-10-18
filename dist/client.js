@@ -34,7 +34,7 @@ var import_react = require("react");
 // src/shared/remote.ts
 var import_zod2 = require("zod");
 
-// node_modules/@deepseek-ai/dsh-typert-protocol/lib/types/remote-info.js
+// ../../../node_modules/@deepseek-ai/dsh-typert-protocol/lib/types/remote-info.js
 function createTypertRemoteInfo(spec, zod) {
   return new RemoteInfo(spec, zod);
 }
@@ -413,14 +413,14 @@ function SettingsPanel({ ctx }) {
     { "aria-label": "\u5927\u80A5\u9C7C\u8BBE\u7F6E", "data-mode": "pilot", style: { padding: 24, border: "1px solid #71809666", borderRadius: 16, maxWidth: 760 } },
     (0, import_react.createElement)("small", null, "DaFeiYu \xB7 \u5355\u89C6\u9891\u5B9E\u9A8C\u7248"),
     (0, import_react.createElement)("h2", null, "\u5927\u80A5\u9C7C"),
-    (0, import_react.createElement)("p", { role: "status" }, status ? `\u672C\u8F6E\u6A21\u578B\u8BF7\u6C42 ${status.budget.used} / ${status.budget.total} \xB7 \u7D2F\u8BA1 ${status.budget.lifetimeUsed ?? status.budget.used} \xB7 ${status.run?.state ?? "\u5C1A\u672A\u542F\u52A8"} \xB7 15 \u5206\u949F / 1 \u6761\u8BC4\u8BBA / 2 \u6761\u56DE\u590D` : "\u5C1A\u672A\u8FDE\u63A5 Desktop \u8FD0\u884C\u72B6\u6001"),
+    (0, import_react.createElement)("p", { role: "status" }, status ? `\u65E7\u8BD5\u8DD1\u8BF7\u6C42 ${status.budget.used} / ${status.budget.total} \xB7 \u5386\u53F2\u8BD5\u8DD1\u7D2F\u8BA1 ${status.budget.lifetimeUsed ?? status.budget.used} \xB7 ${status.run?.state ?? "\u5C1A\u672A\u542F\u52A8"} \xB7 15 \u5206\u949F / 1 \u6761\u8BC4\u8BBA / 2 \u6761\u56DE\u590D` : "\u5C1A\u672A\u8FDE\u63A5 Desktop \u8FD0\u884C\u72B6\u6001"),
     error ? (0, import_react.createElement)("p", { role: "alert", style: { color: "#e15b64", overflowWrap: "anywhere" } }, error) : null,
     status?.configError || status?.credentialError ? (0, import_react.createElement)("p", { role: "alert" }, status.configError || status.credentialError) : null,
     notice ? (0, import_react.createElement)("p", null, notice) : null,
     (0, import_react.createElement)(
       "fieldset",
-      { disabled: disabled || status?.busy || status?.trialConsumed },
-      (0, import_react.createElement)("legend", null, "\u8EAB\u4EFD\u4E0E\u76EE\u6807"),
+      { disabled: disabled || status?.busy },
+      (0, import_react.createElement)("legend", null, "\u8EAB\u4EFD\u3001\u76EE\u6807\u4E0E\u4EBA\u683C\uFF08\u5386\u53F2\u516C\u5F00\u6388\u6743\u4E0D\u53D8\uFF09"),
       field("\u4E3B\u4EBA UID\uFF08\u4E0D\u662F\u673A\u5668\u4EBA\u8D26\u53F7\uFF09", "ownerUid"),
       field("\u76EE\u6807 BV \u53F7", "bvid"),
       field("\u516C\u5F00\u4EBA\u683C", "persona"),
@@ -456,10 +456,11 @@ function SettingsPanel({ ctx }) {
     (0, import_react.createElement)("p", null, "\u540D\u79F0\u548C\u8BF4\u660E\u6765\u81EA\u5BBF\u4E3B\u6A21\u578B\u76EE\u5F55\uFF1B\u4E0D\u81EA\u52A8\u5224\u65AD\u4EF7\u683C\u6216\u5207\u6362\u5907\u7528\u6A21\u578B\u3002\u4FDD\u5B58\u4E0D\u53D1\u8D77\u751F\u6210\u8BF7\u6C42\uFF0C\u4E5F\u4E0D\u91CD\u7F6E\u9884\u7B97\u3002"),
     (0, import_react.createElement)("h3", null, "B\u7AD9\u8D26\u53F7"),
     (0, import_react.createElement)("p", null, status?.account ? `\u5DF2\u4FDD\u5B58\u673A\u5668\u4EBA\u8D26\u53F7 UID\uFF1A${status.account.uid}\uFF08\u8FD0\u884C\u524D\u4F1A\u91CD\u65B0\u9A8C\u8BC1\uFF09` : "\u5C1A\u672A\u767B\u5F55"),
-    button("\u626B\u7801\u767B\u5F55", () => act(async () => {
+    button("\u626B\u7801\u767B\u5F55 / \u540C\u8D26\u53F7\u91CD\u65B0\u8BA4\u8BC1", () => act(async () => {
       setPreflight(null);
       setQr(await call("loginStart"));
-    }), !!status?.trialConsumed || !!status?.busy),
+    }), !!status?.busy),
+    (0, import_react.createElement)("p", null, "\u91CD\u65B0\u8BA4\u8BC1\u53EA\u80FD\u4F7F\u7528\u5DF2\u7ED1\u5B9A\u7684\u673A\u5668\u4EBA UID\uFF1B\u6CE8\u9500\u6216\u91CD\u767B\u4E0D\u4F1A\u6062\u590D\u8BD5\u8DD1\u3001\u53D1\u9001\u6B21\u6570\u6216\u6A21\u578B\u989D\u5EA6\u3002"),
     button("\u79FB\u9664\u672C\u5730\u767B\u5F55\u51ED\u8BC1", () => act(async () => {
       setQr(null);
       setPreflight(null);
@@ -583,12 +584,13 @@ function SettingsPanel({ ctx }) {
       ) : null
     ) : null,
     (0, import_react.createElement)("h3", null, "\u4E3B\u4EBA\u4F1A\u8BDD"),
-    (0, import_react.createElement)("p", null, "\u9996\u6B21\u9A8C\u6536\u9884\u7559 1 \u6B21\u79C1\u804A\u8BF7\u6C42\uFF1B\u6D3B\u52A8\u7ED3\u675F\u7684\u6C47\u62A5\u53E6\u9884\u7559 1 \u6B21\u3002"),
+    (0, import_react.createElement)("p", null, status?.privateBudget ? `\u72EC\u7ACB\u79C1\u804A\u989D\u5EA6\uFF1A\u5DF2\u7528 ${status.privateBudget.used} / ${status.privateBudget.limit}\uFF0C\u5269\u4F59 ${status.privateBudget.remaining}\uFF1B\u7D2F\u8BA1 ${status.privateBudget.lifetimeUsed}\u3002\u6BCF\u6B21\u6700\u591A ${status.privateBudget.outputTokens} \u8F93\u51FA tokens\u3002` : "\u5148\u4FDD\u5B58\u4E3B\u4EBA UID\uFF1B\u79C1\u804A\u4E0D\u9700\u8981\u76EE\u6807 BV \u6216 B\u7AD9\u767B\u5F55\u3002"),
+    (0, import_react.createElement)("p", null, "\u79C1\u804A\u989D\u5EA6\u4E0E\u516C\u5F00\u8BD5\u8DD1\u72EC\u7ACB\uFF0C\u5931\u8D25\u8BA1\u6B21\u3001\u505C\u6B62\u6216\u91CD\u542F\u4E0D\u8865\u989D\u3002\u76EE\u524D\u672A\u5F00\u653E\u65B0\u589E\u989D\u5EA6\uFF0C\u9ED8\u8BA4\u89C4\u5219\u5F85\u4E3B\u4EBA\u786E\u8BA4\uFF1B\u65E7\u516C\u5F00\u9884\u7B97\u4E0E\u8BB0\u5F55\u4FDD\u6301\u3002"),
     (0, import_react.createElement)("textarea", { value: chat, onChange: (e) => setChat(e.target.value), maxLength: 4e3, "aria-label": "\u7ED9\u5927\u80A5\u9C7C\u7684\u6D88\u606F", style: { width: "100%", minHeight: 70 } }),
     button("\u53D1\u9001\u5230\u5927\u80A5\u9C7C\u4F1A\u8BDD", () => act(async () => {
       const result = await call("chat", { text: chat });
       setAnswer(result.text);
-    }), !chat.trim() || status?.budget.grant === "media-trial-2" || !!status?.budget.byPurpose.private || !!status?.busy),
+    }), !chat.trim() || !status?.privateBudget?.enabled || !!status?.busy),
     answer ? (0, import_react.createElement)("p", { style: { whiteSpace: "pre-wrap" } }, answer) : null,
     status?.privateSessionId ? (0, import_react.createElement)("p", null, "\u6301\u4E45\u4F1A\u8BDD\u5DF2\u5EFA\u7ACB\uFF0C\u53EF\u5728\u4FA7\u680F\u6253\u5F00\u300C\u5927\u80A5\u9C7C \xB7 \u4E3B\u4EBA\u4F1A\u8BDD\u300D\u3002") : null,
     (0, import_react.createElement)("h3", null, "\u9650\u5B9A\u89C6\u9891\u8BD5\u8DD1"),

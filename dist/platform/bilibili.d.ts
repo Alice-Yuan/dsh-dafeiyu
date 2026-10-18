@@ -10,8 +10,9 @@ export declare class Bilibili implements BiliPort {
     private readonly fetcher;
     private readonly now;
     private readonly media?;
+    private readonly acceptAccount?;
     private login;
-    constructor(vault: Vault, fetcher?: typeof fetch, now?: () => number, media?: MediaReader | undefined);
+    constructor(vault: Vault, fetcher?: typeof fetch, now?: () => number, media?: MediaReader | undefined, acceptAccount?: ((account: Account) => void) | undefined);
     hasCredential(): Promise<Account | null>;
     private raw;
     private credential;

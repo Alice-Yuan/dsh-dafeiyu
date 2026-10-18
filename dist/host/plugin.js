@@ -36,7 +36,7 @@ import s from '@deepseek-ai/schemastery';
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { configOf, DEFAULT_PERSONA, LIMITS, PilotError, safeError } from '../pilot/contracts.js';
+import { configOf, DEFAULT_PERSONA, LIMITS, PilotError, safeError, samePublicAuthorization } from '../pilot/contracts.js';
 import { PilotStore } from '../pilot/store.js';
 import { PilotRunner } from '../pilot/runner.js';
 import { Bilibili } from '../platform/bilibili.js';
@@ -50,6 +50,7 @@ import { BrowseRunner } from '../browse/runner.js';
 import { BrowseStore } from '../browse/store.js';
 import { ActivityStore } from '../browse/activity-store.js';
 import { Curator } from '../browse/curation.js';
+import { PrivateChatBudget } from '../pilot/private-chat.js';
 export const name = 'dafeyu';
 export const inject = ['profileContext', 'configEditor', 'agents', 'agentDefaultModel', 'agentPresets', 'typert', 'llm', 'attachments'];
 export const Config = s.object({
@@ -144,6 +145,7 @@ let DaFeiYuControl = (() => {
         curatorValue = null;
         previewController = null;
         mediaController = null;
+        chatController = null;
         lifetime = new AbortController();
         serial = Promise.resolve();
         exclusiveActive = false;
@@ -165,13 +167,22 @@ let DaFeiYuControl = (() => {
             return this.storeValue;
         }
         platform() {
-            return this.platformValue ??= new Bilibili(new WindowsVault(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'bilibili.dpapi')), fetch, Date.now, new FfmpegMediaReader(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'media-temp')));
+            return this.platformValue ??= new Bilibili(new WindowsVault(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'bilibili.dpapi')), fetch, Date.now, new FfmpegMediaReader(join(this.owner.profileContext.dir, 'data', 'dsh-dafeiyu', 'media-temp')), account => this.store().bindAccount(this.currentConfig().ownerUid, account.uid));
+        }
+        async retainAccountBinding() {
+            const store = this.store(), config = this.currentConfig();
+            store.bindOwner(config.ownerUid);
+            if (!store.boundAccountUid()) {
+                const saved = await this.platform().hasCredential();
+                if (saved && saved.uid !== config.ownerUid)
+                    store.bindAccount(config.ownerUid, saved.uid);
+            }
         }
         model() { return this.modelValue ??= new HostModel(this.owner, () => this.store(), () => this.currentConfig()); }
         runner() { return this.runnerValue ??= new PilotRunner(this.store(), this.platform(), this.model(), () => this.currentConfig()); }
         browseStore() { return this.browseStoreValue ??= new BrowseStore(this.store()); }
         activity() { return this.activityValue ??= new ActivityStore(this.store()); }
-        curator() { return this.curatorValue ??= new Curator(this.browseStore(), this.activity(), (prompt, signal, reserve) => this.model().preview(prompt, signal, reserve)); }
+        curator() { return this.curatorValue ??= new Curator(this.browseStore(), this.activity(), (prompt, signal, reserve) => this.model().preview(prompt, signal, reserve), Date.now, () => this.currentConfig().persona); }
         browser() {
             return this.browseRunnerValue ??= new BrowseRunner(this.browseStore(), {
                 account: signal => this.platform().account(signal),
@@ -291,14 +302,15 @@ let DaFeiYuControl = (() => {
                     this.decoderCheck = { at: Date.now(), available };
                 }
                 return { config, revision: this.revision(), limits: LIMITS, budget: store.budget(), account, credentialError,
+                    privateBudget: config.ownerUid && !mismatch ? new PrivateChatBudget(store).status(config.ownerUid) : null,
                     configError: mismatch ? 'STORE_CONFIG_MISMATCH' : '', trialConsumed: !!store.get('trialConsumed'),
-                    busy: !!this.previewController || !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
+                    busy: !!this.chatController || !!this.modelValue?.busy || !!this.previewController || !!this.mediaController || !!this.browseRunnerValue?.busy || (this.runnerValue?.busy ?? false), run: store.runs()[0] ?? null, actions: store.actions(),
                     browseBusy: this.browseRunnerValue?.busy ?? false, browseRun: this.browseStore().latest(),
                     browseSettings: this.activity().settings(), browseUsage: this.activity().usage(account?.uid ?? '', Date.now()),
                     privateSessionId: store.get('privateSession'), report: store.get('latestReport'), reportError: store.get('reportError'),
                     videoInspection: store.get('videoInspection'), videoInspectionRevision: store.inspectionRevision(), videoReview: store.get('videoReview'), videoCalibrationConsumed: !!store.get('videoCalibrationConsumed'), videoInspectionConsumed: !!store.get('videoInspectionConsumed'), mediaTrialConsumed: !!store.get('mediaTrialConsumed'),
                     ownerVideoRequest: store.get('ownerVideoRequest'), ownerVideoBaselineAt: store.get('ownerVideoBaselineAt'), modelSelection: this.model().selection(), modelPinned: !!store.get('modelSelection'),
-                    diagnostic: { version: '0.1.0-alpha.11', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
+                    diagnostic: { version: '0.1.0-alpha.12', hostBaseline: '0.2.1-rc.2', node: process.versions.node, marker: config.diagnosticMarker, decoderAvailable: this.decoderCheck.available } };
             }, false);
         }
         browse(request, signal) {
@@ -346,14 +358,14 @@ let DaFeiYuControl = (() => {
         }
         saveConfig(request, signal) {
             return this.call('saveConfig', request, signal, async (value) => {
-                if (this.runnerValue?.busy)
+                if (this.runnerValue?.busy || this.mediaController || this.modelValue?.busy)
                     throw new PilotError('RUN_BUSY');
                 if (value.revision !== this.revision())
                     throw new PilotError('CONFIG_REVISION_CONFLICT');
                 const config = configOf(value.config);
                 const store = this.store();
                 store.assertOwner(config.ownerUid);
-                if (store.get('trialConsumed') && JSON.stringify(config) !== JSON.stringify(this.currentConfig()))
+                if ((store.get('trialConsumed') || store.get('mediaTrialConsumed')) && !samePublicAuthorization(config, this.currentConfig()))
                     throw new PilotError('TRIAL_CONFIG_LOCKED');
                 const entry = this.owner.fiber.entry;
                 if (!entry)
@@ -366,20 +378,22 @@ let DaFeiYuControl = (() => {
         }
         loginStart(request, signal) {
             return this.call('loginStart', request, signal, async (_value, lifetime) => {
-                if (this.runnerValue?.busy || this.store().get('trialConsumed'))
-                    throw new PilotError('TRIAL_ACCOUNT_LOCKED');
+                if (this.runnerValue?.busy || this.mediaController || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
+                await this.retainAccountBinding();
+                lifetime.throwIfAborted();
                 return this.platform().loginStart(lifetime);
             });
         }
         loginPoll(request, signal) {
             return this.call('loginPoll', request, signal, async (value, lifetime) => {
-                if (this.runnerValue?.busy || this.store().get('trialConsumed'))
-                    throw new PilotError('TRIAL_ACCOUNT_LOCKED');
+                if (this.runnerValue?.busy || this.mediaController || this.modelValue?.busy)
+                    throw new PilotError('RUN_BUSY');
                 return this.platform().loginPoll(value.loginId, lifetime);
             });
         }
         logout(request, signal) {
-            return this.call('logout', request, signal, async () => { await this.runnerValue?.stop(); await this.platform().logout(); return { removed: true }; });
+            return this.call('logout', request, signal, async () => { await this.runnerValue?.stop(); await this.retainAccountBinding(); await this.platform().logout(); return { removed: true }; });
         }
         preflight(request, signal) {
             return this.call('preflight', request, signal, async (_value, lifetime) => this.mediaOperation(lifetime, async (lifetime) => {
@@ -509,9 +523,23 @@ let DaFeiYuControl = (() => {
         }
         chat(request, signal) {
             return this.call('chat', request, signal, async (value, lifetime) => {
-                const config = configOf(this.currentConfig(), true);
-                return this.model().ask({ purpose: 'private', persona: config.persona, prompt: value.text }, lifetime);
-            });
+                // Starts are not queued: a stop cannot accidentally release another
+                // already queued chat into a fresh model request.
+                if (this.exclusiveActive || this.chatController || this.mediaController || this.runnerValue?.busy || this.modelValue?.busy)
+                    throw new PilotError('MODEL_BUSY');
+                const config = configOf(this.currentConfig());
+                this.store().bindOwner(config.ownerUid);
+                if (!new PrivateChatBudget(this.store()).status(config.ownerUid).enabled)
+                    throw new PilotError('PRIVATE_CHAT_BUDGET_EXHAUSTED');
+                const controller = new AbortController();
+                this.chatController = controller;
+                try {
+                    return await this.model().ask({ purpose: 'private', persona: config.persona, prompt: value.text }, AbortSignal.any([lifetime, controller.signal]));
+                }
+                finally {
+                    this.chatController = null;
+                }
+            }, false);
         }
         start(request, signal) {
             return this.call('start', request, signal, async (value, lifetime) => {
@@ -530,7 +558,7 @@ let DaFeiYuControl = (() => {
             });
         }
         stop(request, signal) {
-            return this.call('stop', request, signal, async () => { this.previewController?.abort(); this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
+            return this.call('stop', request, signal, async () => { this.chatController?.abort(); this.modelValue?.cancelPrivate(); this.previewController?.abort(); this.mediaController?.abort(); this.browseRunnerValue?.stop(); await this.runnerValue?.stop(); return { stopped: true }; }, false);
         }
         reconcile(request, signal) {
             return this.call('reconcile', request, signal, async (_value, lifetime) => { if (this.runnerValue?.busy)

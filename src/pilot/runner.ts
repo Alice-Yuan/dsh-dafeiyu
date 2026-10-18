@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import { configOf, intentOf, LIMITS, PilotError, safeError, type Account, type BiliPort, type Comment, type PilotConfig, type PilotModel, type VideoMaterial } from './contracts.js';
+import { configOf, intentOf, LIMITS, PilotError, safeError, samePublicAuthorization, type Account, type BiliPort, type Comment, type PilotConfig, type PilotModel, type VideoMaterial } from './contracts.js';
 import { PilotStore, type Action, type Run, type Grant } from './store.js';
 import { publicVideo, MEDIA_INSTRUCTION } from './material.js';
 
@@ -59,7 +59,9 @@ export class PilotRunner {
   }
   private active(runId: string, signal: AbortSignal): Run {
     signal.throwIfAborted(); const run = this.store.run(runId); this.store.assertActive(run, this.now());
-    if (JSON.stringify(this.config()) !== JSON.stringify(run.config)) throw new PilotError('CONFIG_CHANGED');
+    // The run retains its original persona snapshot; only authorization identity
+    // must still match live settings. Cosmetic edits cannot renew the run.
+    if (!samePublicAuthorization(this.config(), run.config)) throw new PilotError('CONFIG_CHANGED');
     return run;
   }
   private async execute(initial: Run, video: VideoMaterial, comments: Comment[], signal: AbortSignal): Promise<void> {

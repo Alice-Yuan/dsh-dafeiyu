@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { LIMITS, PilotError } from './contracts.js';
+import { LIMITS, PilotError, samePublicAuthorization } from './contracts.js';
 import { publicVideo } from './material.js';
 export class PilotStore {
     db;
@@ -72,6 +72,28 @@ export class PilotStore {
         throw new PilotError('STORE_CONFIG_MISMATCH'); }
     bindOwner(ownerUid) { if (!ownerUid)
         throw new PilotError('CONFIG_INCOMPLETE'); this.assertOwner(ownerUid); this.set('ownerUid', ownerUid); }
+    boundAccountUid() {
+        // Old installations already have run snapshots. Recover the binding from
+        // them without editing the run or resetting its consumed grant.
+        const identities = new Set(this.runs().map(run => run.accountUid));
+        const saved = this.get('botUid');
+        if (saved)
+            identities.add(saved);
+        if (identities.size > 1 || [...identities].some(uid => !/^[1-9]\d{0,24}$/.test(uid)))
+            throw new PilotError('STORE_ACCOUNT_MISMATCH');
+        return identities.values().next().value ?? null;
+    }
+    bindAccount(ownerUid, accountUid) {
+        this.transaction(() => {
+            this.bindOwner(ownerUid);
+            if (!/^[1-9]\d{0,24}$/.test(accountUid) || accountUid === ownerUid)
+                throw new PilotError('BOT_EQUALS_OWNER');
+            const saved = this.boundAccountUid();
+            if (saved && saved !== accountUid)
+                throw new PilotError('ACCOUNT_CHANGED');
+            this.set('botUid', accountUid);
+        });
+    }
     inspectionRevision() { const value = this.get('videoInspection'); return value ? createHash('sha256').update(value).digest('hex') : ''; }
     matchInspection(accountUid, video) {
         let saved;
@@ -153,7 +175,7 @@ export class PilotStore {
                 throw new PilotError('TRIAL_ALREADY_CONSUMED');
             if (grant === 'media-trial-2') {
                 const previous = this.runs().find(r => r.id === this.get('trialConsumed'));
-                if (!previous || previous.state !== 'completed' || previous.accountUid !== accountUid || JSON.stringify(previous.config) !== JSON.stringify(config) || !this.get('videoInspection'))
+                if (!previous || previous.state !== 'completed' || previous.accountUid !== accountUid || !samePublicAuthorization(previous.config, config) || !this.get('videoInspection'))
                     throw new PilotError('MEDIA_TRIAL_NOT_READY');
                 let inspection;
                 try {
@@ -172,7 +194,11 @@ export class PilotStore {
                     this.set('report:' + previous.id, this.get('latestReport'));
                 this.set('activeGrant', grant);
             }
+            const boundAccount = this.boundAccountUid();
+            if (boundAccount && boundAccount !== accountUid)
+                throw new PilotError('ACCOUNT_CHANGED');
             const run = { id: randomUUID(), accountUid, config: structuredClone(config), startedAt: now, deadline: now + LIMITS.durationMs, state: 'running', reason: '', root: '', grant };
+            this.set('botUid', accountUid);
             this.set(grant === 'initial' ? 'trialConsumed' : 'mediaTrialConsumed', run.id);
             this.saveRun(run);
             return run;

@@ -43,6 +43,7 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private curatorValue;
     private previewController;
     private mediaController;
+    private chatController;
     private readonly lifetime;
     private serial;
     private exclusiveActive;
@@ -53,6 +54,7 @@ export declare class DaFeiYuControl extends TypertRemoteService {
     private revision;
     private store;
     private platform;
+    private retainAccountBinding;
     private model;
     private runner;
     private browseStore;

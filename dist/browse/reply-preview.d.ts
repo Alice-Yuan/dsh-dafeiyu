@@ -17,4 +17,4 @@ export interface ReplyInput {
     text: string;
 }
 export declare function eligibleReplies(account: string, threads: OwnThread[], inputs: ReplyInput[], baseline: number, now: number, store: ActivityStore): ReplyInput[];
-export declare function previewReplies(store: ActivityStore, model: PreviewModel, source: string, account: string, threads: OwnThread[], inputs: ReplyInput[], baseline: number, now: number, signal: AbortSignal): Promise<import("./contracts.js").PreviewRound | null>;
+export declare function previewReplies(store: ActivityStore, model: PreviewModel, source: string, account: string, threads: OwnThread[], inputs: ReplyInput[], baseline: number, now: number, signal: AbortSignal, persona?: string): Promise<import("./contracts.js").PreviewRound | null>;

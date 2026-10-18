@@ -119,6 +119,7 @@ export declare class HostModel implements PilotModel {
     private handles;
     private pending;
     private disposed;
+    private privateBusy;
     private readonly detach;
     private get store();
     get busy(): boolean;
@@ -141,5 +142,6 @@ export declare class HostModel implements PilotModel {
     private requireVision;
     private session;
     recordReport(text: string): Promise<void>;
+    cancelPrivate(): void;
     dispose(): Promise<void>;
 }

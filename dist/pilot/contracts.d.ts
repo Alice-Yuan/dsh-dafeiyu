@@ -21,6 +21,11 @@ export interface PilotConfig {
     persona: string;
     diagnosticMarker: string;
 }
+export declare function publicAuthorization(config: Readonly<PilotConfig>): {
+    ownerUid: string;
+    bvid: string;
+};
+export declare function samePublicAuthorization(a: Readonly<PilotConfig>, b: Readonly<PilotConfig>): boolean;
 export declare const DEFAULT_CONFIG: PilotConfig;
 export declare function decimalId(value: unknown): string;
 export declare function configOf(input: unknown, complete?: boolean): PilotConfig;
