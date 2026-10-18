@@ -171,12 +171,9 @@ export class Bilibili implements BiliPort {
     if (data.code !== 0) throw new PilotError('LOGIN_FAILED');
     const cookies: Record<string, string> = {};
     for (const header of headers.getSetCookie()) { const first = header.split(';')[0]!; const eq = first.indexOf('='); if (eq > 0) cookies[first.slice(0, eq)] = first.slice(eq + 1); }
-    // Some successful responses carry the same cookie values in their redirect query.
-    if (typeof data.url === 'string') {
-      const redirect = new URL(data.url);
-      if (!['passport.bilibili.com', 'www.bilibili.com'].includes(redirect.hostname)) throw new PilotError('LOGIN_SCHEMA_CHANGED');
-      for (const key of ['SESSDATA', 'bili_jct', 'DedeUserID']) if (!cookies[key]) { const value = redirect.searchParams.get(key); if (value) cookies[key] = value; }
-    }
+    // The official HTTPS response's Set-Cookie headers are authoritative.
+    // Ignore its cross-site redirect URL entirely: never follow it or import
+    // credentials from a query string. Missing cookies fail closed below.
     const spi = await this.raw(API + '/x/frontend/finger/spi', signal);
     const credential = credentialOf({ uid: cookies.DedeUserID, sessdata: cookies.SESSDATA, csrf: cookies.bili_jct, buvid3: spi.data.b_3 });
     const checked = (await this.raw(API + '/x/web-interface/nav', signal, credential)).data;

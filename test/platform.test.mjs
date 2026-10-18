@@ -103,7 +103,11 @@ test('QR result exposes only account identity; credentials pass server validatio
   const adapter = new Bilibili(storage, async url => {
     const path = new URL(url).pathname;
     if (path.endsWith('/generate')) return ok({ url: 'https://passport.bilibili.com/qrcode/synthetic', qrcode_key: 'synthetic-qr-key' });
-    if (path.endsWith('/poll')) { polls++; return ok({ code: 0, url: 'https://www.bilibili.com/?SESSDATA=synthetic-session-value&bili_jct=synthetic-csrf-value&DedeUserID=30001' }); }
+    if (path.endsWith('/poll')) { polls++; return ok({ code: 0, url: 'https://untrusted.invalid/cross-domain' }, [
+      ['Set-Cookie', 'SESSDATA=synthetic-session-value; HttpOnly; Secure'],
+      ['Set-Cookie', 'bili_jct=synthetic-csrf-value; Secure'],
+      ['Set-Cookie', 'DedeUserID=30001; Secure'],
+    ]); }
     if (path.endsWith('/spi')) return ok({ b_3: credential.buvid3 });
     return ok(nav);
   }, () => now);
@@ -124,6 +128,19 @@ test('QR login admits the current official account page and rejects URL or key s
     official.replace('/scan-web', '/other'), official.replace(key, 'wrong-key'), official.replace('https://', 'https://user@'), official + '#fragment']) {
     await assert.rejects(make(url).loginStart(signal()), /LOGIN_SCHEMA_CHANGED/);
   }
+});
+
+test('QR success without response cookies refuses URL credentials and does not save a login', async () => {
+  const storage = vault(); storage.value = null;
+  const adapter = new Bilibili(storage, async url => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/generate')) return ok({ url: 'https://passport.bilibili.com/qrcode/synthetic', qrcode_key: 'synthetic-key' });
+    if (path.endsWith('/poll')) return ok({ code: 0, url: 'https://www.bilibili.com/?SESSDATA=synthetic-session-value&bili_jct=synthetic-csrf-value&DedeUserID=30001' });
+    assert.ok(path.endsWith('/spi')); return ok({ b_3: credential.buvid3 });
+  });
+  const qr = await adapter.loginStart(signal());
+  await assert.rejects(adapter.loginPoll(qr.loginId, signal()), /INVALID_CREDENTIAL/);
+  assert.equal(storage.value, null);
 });
 
 test('Windows CurrentUser DPAPI vault persists only ciphertext, reopens and deletes synthetic material', { skip: process.platform !== 'win32' }, async () => {
